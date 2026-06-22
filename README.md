@@ -2,7 +2,6 @@
 
 ## Cloud Security Posture Management with AI Risk Analysis
 
-**Version:** 1.0
 **Project Type:** Enterprise SaaS Security Platform
 **Target Users:** CISO, Security Teams, DevSecOps, Cloud Engineers, Executive Management
 
