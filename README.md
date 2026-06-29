@@ -6,7 +6,6 @@ CSPM Platform
 **Target Users:** CISO, Security Teams, DevSecOps, Cloud Engineers, Executive Management
 
 <img width="1497" height="760" alt="Zrzut ekranu 2026-06-25 o 00 01 02" src="https://github.com/user-attachments/assets/27c3f4a6-f3c6-482a-b043-41628c6d430b" />
-# AI-Driven
 
 ---
 
