@@ -437,6 +437,26 @@ test("invite acceptance by an existing user who signed out everywhere still yiel
   assert.equal((await c.get("/auth/me")).status, 200); // used to be 401: cookie carried version 0
 });
 
+test("an invited SSO-only user accepts through their signed-in session; nobody else can skip the password", async () => {
+  const owner = await signup();
+  const email = `sso-inv-${Date.now()}@example.com`;
+  const sso = new Client();
+  await sso.get(`/auth/sso?token=${signJwt({ sub: `nx-inv-${Date.now()}`, email, org: `nx-org-inv-${Date.now()}`, orgName: "Own", jti: `jti-inv-${Date.now()}` }, "test-sso-secret", 120)}`);
+  assert.equal((await sso.get("/auth/me")).json.user.hasPassword, false);
+  const inv = await owner.c.post("/team/invite", { email, role: "analyst" });
+  const token = inv.json.link.split("/invite/")[1];
+  assert.equal((await new Client().post("/invites/accept", { token })).status, 401); // no session, no password
+  assert.equal((await new Client().post("/invites/accept", { token, password: "some password 123" })).status, 401); // SSO user has no password to match
+  const ok = await sso.post("/invites/accept", { token });
+  assert.equal(ok.status, 201);
+  assert.equal(ok.json.org.id, owner.me.org.id);
+  assert.equal(ok.json.role, "analyst");
+  assert.equal((await sso.get("/auth/me")).status, 200);
+  // a brand-new invitee still has to choose a password
+  const inv2 = await owner.c.post("/team/invite", { email: `fresh-${Date.now()}@example.com`, role: "viewer" });
+  assert.equal((await new Client().post("/invites/accept", { token: inv2.json.link.split("/invite/")[1] })).json.error.code, "password_required");
+});
+
 test("SSO-only accounts can delete themselves by typing their email", async () => {
   const tok = signJwt({ sub: "nx-del-1", email: "sso-del@example.com", org: "nx-org-del", orgName: "Del", jti: `jti-del-${Date.now()}` }, "test-sso-secret", 120);
   const c = new Client();

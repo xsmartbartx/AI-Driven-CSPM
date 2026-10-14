@@ -98,7 +98,7 @@ export function App() {
   return (
     <Router>
       <Switch>
-        <Route path="/invite/:token">{(p) => <InvitePage token={p.token} onDone={setMe} />}</Route>
+        <Route path="/invite/:token">{(p) => <InvitePage token={p.token} onDone={setMe} signedInSso={!!me && !me.user.hasPassword ? me.user.email : null} />}</Route>
         {!me ? (
           <Route><AuthPage onAuth={setMe} /></Route>
         ) : (
