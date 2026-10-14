@@ -1,3 +1,15 @@
+> **Running it locally** (see `replica/` for the plan, tests and deploy checklist)
+>
+> ```bash
+> pnpm install
+> pnpm --filter @workspace/api-server dev          # API on :8080 (embedded Postgres in .data/)
+> pnpm --filter @workspace/cspm-site dev           # marketing site :5173
+> pnpm --filter @workspace/cspm-app dev            # dashboard :5174
+> pnpm --filter @workspace/api-server test         # 27 API tests
+> (cd e2e && npx playwright test)                  # 33 browser tests, needs Chrome
+> ```
+> Status: working Phase-1 product (paste-config scan, dashboard, roles, quotas). Not yet: live AWS connection, email, live billing. See `replica/deploy.md`.
+
 CSPM Platform
 
 ## Cloud Security Posture Management with AI Risk Analysis

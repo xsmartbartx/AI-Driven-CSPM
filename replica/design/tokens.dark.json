@@ -1,0 +1,14 @@
+{
+  "color": {
+    "bg": "#0e1116", "surface": "#161b22", "surface-2": "#1f262f", "border": "#2b333e", "border-input": "#7d8794",
+    "text": "#edf0f4", "text-muted": "#a2abb8",
+    "accent": "#4cb8d8", "on-accent": "#06222c",
+    "danger": "#ff8a80", "success": "#56d39a", "warning": "#f2b84b",
+    "sev-critical": "#ff8a80", "sev-high": "#ffa45c", "sev-medium": "#f2b84b", "sev-low": "#a2abb8"
+  },
+  "pairs": [
+    ["text","bg"],["text","surface"],["text","surface-2"],["text-muted","bg"],["text-muted","surface"],["text-muted","surface-2"],
+    ["on-accent","accent"],["accent","bg"],["accent","surface"],["danger","bg"],["success","bg"],["warning","bg"],
+    ["sev-critical","bg"],["sev-high","bg"],["sev-medium","bg"],["sev-low","bg"],["border-input","bg","ui"]
+  ]
+}

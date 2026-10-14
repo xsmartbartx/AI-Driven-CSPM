@@ -1,0 +1,13 @@
+{
+  "name": "@workspace/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "playwright test", "test:headed": "playwright test --headed" },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.0",
+    "@playwright/test": "^1.50.0",
+    "@types/node": "catalog:",
+    "typescript": "~5.9.3"
+  }
+}

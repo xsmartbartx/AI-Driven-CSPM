@@ -1,34 +1,51 @@
-import express, { type Express } from "express";
+import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
-import router from "./routes";
+import type { Db } from "@workspace/db";
+import { config } from "./config";
 import { logger } from "./lib/logger";
+import { HttpError } from "./lib/errors";
+import healthRouter from "./routes/health";
+import authRouter from "./routes/auth";
+import scansRouter from "./routes/scans";
+import findingsRouter from "./routes/findings";
+import teamRouter from "./routes/team";
 
-const app: Express = express();
+export function createApp(db: Db): Express {
+  const app: Express = express();
+  app.disable("x-powered-by");
+  if (config.trustProxy) app.set("trust proxy", 1);
 
-app.use(
-  pinoHttp({
+  app.use(pinoHttp({
     logger,
     serializers: {
-      req(req) {
-        return {
-          id: req.id,
-          method: req.method,
-          url: req.url?.split("?")[0],
-        };
-      },
-      res(res) {
-        return {
-          statusCode: res.statusCode,
-        };
-      },
+      req: (req) => ({ id: req.id, method: req.method, url: req.url?.split("?")[0] }),
+      res: (res) => ({ statusCode: res.statusCode }),
     },
-  }),
-);
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+  }));
+  app.use((_req, res, next) => {
+    res.setHeader("x-content-type-options", "nosniff");
+    res.setHeader("x-frame-options", "DENY");
+    res.setHeader("referrer-policy", "no-referrer");
+    res.setHeader("content-security-policy", "default-src 'none'; frame-ancestors 'none'");
+    res.setHeader("cache-control", "no-store");
+    if (config.prod) res.setHeader("strict-transport-security", "max-age=63072000; includeSubDomains");
+    next();
+  });
+  // exact origins only, with credentials. Unlisted origins get no CORS headers.
+  app.use(cors({ origin: (o, cb) => cb(null, !o || config.origins.includes(o)), credentials: true, allowedHeaders: ["content-type", "x-csrf", "authorization"], methods: ["GET", "POST", "PATCH", "DELETE"] }));
+  app.use(express.json({ limit: "1mb", verify: (req, _res, buf) => { (req as Request).rawBody = buf; } }));
+  app.use((req, _res, next) => { req.db = db; next(); });
 
-app.use("/api", router);
+  app.use("/api", healthRouter, authRouter, scansRouter, findingsRouter, teamRouter);
+  app.use("/api", (_req, _res, next) => next(new HttpError(404, "not_found", "Unknown endpoint")));
 
-export default app;
+  app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
+    if (err instanceof HttpError) return void res.status(err.status).json({ error: { code: err.code, message: err.message } });
+    if (err?.type === "entity.too.large") return void res.status(413).json({ error: { code: "too_large", message: "Request body is too large (limit 1 MB)" } });
+    if (err?.type === "entity.parse.failed") return void res.status(400).json({ error: { code: "invalid_json", message: "Request body is not valid JSON" } });
+    req.log?.error({ err }, "unhandled error");
+    res.status(500).json({ error: { code: "internal", message: "Something went wrong" } });
+  });
+  return app;
+}
