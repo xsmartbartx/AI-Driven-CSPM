@@ -16,13 +16,21 @@ const { signJwt } = await import("../src/lib/crypto.ts");
 const { resetRateLimits } = await import("../src/lib/ratelimit.ts");
 const { verifyStripeSignature } = await import("../src/routes/team.ts");
 const { SAMPLE_CONFIG } = await import("@workspace/cspm-engine");
+const { resendMailer } = await import("../src/services/mail.ts");
+
+// Every email lands here instead of being sent.
+const outbox: { to: string; subject: string; text: string; html: string }[] = [];
+let mailWorks = true;
+const testMailer = { enabled: true, send: async (m: any) => { if (!mailWorks) return false; outbox.push(m); return true; } };
+const lastMailTo = (to: string) => [...outbox].reverse().find((m) => m.to === to);
+const tokenIn = (m: { text: string }, kind: string) => m.text.match(new RegExp(`/${kind}/([A-Za-z0-9_-]+)`))![1]!;
 
 let server: Server;
 let base: string;
 let db: Awaited<ReturnType<typeof openDb>>;
 before(async () => {
   db = await openDb(process.env["TEST_DATABASE_URL"] ? { url: process.env["TEST_DATABASE_URL"] } : { dataDir: ":memory:" });
-  server = createApp(db).listen(0);
+  server = createApp(db, { mailer: testMailer }).listen(0);
   base = `http://127.0.0.1:${(server.address() as any).port}/api`;
 });
 after(async () => {
@@ -516,6 +524,113 @@ test("Stripe: out-of-order events and multiple v1 signatures", async () => {
   assert.equal((await org()).plan, "free");
   assert.equal((await send(ev(), (b, t) => `t=${t},v1=${sigFor(b, t)},v1=${"0".repeat(64)}`)).status, 200);
   assert.equal((await send(ev(), (b, t) => `t=${t},v1=${"0".repeat(64)},v1=${sigFor(b, t, "wrong")}`)).status, 400);
+});
+
+test("signup sends a verification email; the link verifies once", async () => {
+  const { c, email } = await signup();
+  assert.equal((await c.get("/auth/me")).json.user.emailVerified, false);
+  const mail = lastMailTo(email)!;
+  assert.ok(mail.subject.includes("Confirm your email"));
+  const token = tokenIn(mail, "verify-email");
+  assert.equal((await new Client().post("/auth/verify-email", { token: "x".repeat(40) })).json.error.code, "verify_invalid");
+  assert.equal((await new Client().post("/auth/verify-email", { token })).status, 200);
+  assert.equal((await c.get("/auth/me")).json.user.emailVerified, true);
+  assert.equal((await new Client().post("/auth/verify-email", { token })).status, 400); // single use
+  assert.equal((await c.post("/auth/resend-verification")).json.alreadyVerified, true);
+});
+
+test("resending verification: newest link wins, expired links are refused", async () => {
+  const { c, email } = await signup();
+  const first = tokenIn(lastMailTo(email)!, "verify-email");
+  assert.equal((await c.post("/auth/resend-verification")).status, 202);
+  const second = tokenIn(lastMailTo(email)!, "verify-email");
+  assert.notEqual(first, second);
+  assert.equal((await new Client().post("/auth/verify-email", { token: first })).status, 400);
+  await db.query("update email_tokens set expires_at = now() - interval '1 minute' where token_hash is not null and user_id = (select id from users where email = $1)", [email]);
+  assert.equal((await new Client().post("/auth/verify-email", { token: second })).status, 400);
+  assert.equal((await new Client().post("/auth/resend-verification")).status, 401);
+});
+
+test("password reset: no account enumeration, single use, signs out everywhere, newest link wins", async () => {
+  const { c, email } = await signup();
+  const before = outbox.length;
+  const unknown = await new Client().post("/auth/forgot-password", { email: "nobody-here@example.com" });
+  const known = await new Client().post("/auth/forgot-password", { email });
+  assert.equal(unknown.status, 202); assert.equal(known.status, 202);
+  assert.deepEqual(unknown.json, known.json); // identical answers
+  assert.equal(outbox.length, before + 1); // and only the real account got mail
+  const mail = lastMailTo(email)!;
+  assert.ok(mail.subject.includes("Reset your"));
+  const t1 = tokenIn(mail, "reset-password");
+  await new Client().post("/auth/forgot-password", { email });
+  const t2 = tokenIn(lastMailTo(email)!, "reset-password");
+  assert.equal((await new Client().post("/auth/reset-password", { token: t1, password: "brand new password 1" })).json.error.code, "reset_invalid");
+  assert.equal((await new Client().post("/auth/reset-password", { token: t2, password: "short" })).status, 400); // weak password does not burn the token
+  assert.equal((await c.get("/auth/me")).status, 200);
+  assert.equal((await new Client().post("/auth/reset-password", { token: t2, password: "brand new password 1" })).status, 200);
+  assert.equal((await c.get("/auth/me")).status, 401); // old session is gone
+  assert.equal((await new Client().post("/auth/login", { email, password: "correct horse battery" })).status, 401);
+  assert.equal((await new Client().post("/auth/login", { email, password: "brand new password 1" })).status, 200);
+  assert.equal((await new Client().post("/auth/reset-password", { token: t2, password: "another password 12" })).status, 400); // single use
+  assert.equal((await c.get("/auth/me")).status, 401);
+  // resetting also proves the mailbox
+  const me = new Client(); await me.post("/auth/login", { email, password: "brand new password 1" });
+  assert.equal((await me.get("/auth/me")).json.user.emailVerified, true);
+});
+
+test("a reset token cannot be spent twice, even simultaneously; expired tokens are refused", async () => {
+  const { email } = await signup();
+  await new Client().post("/auth/forgot-password", { email });
+  const t = tokenIn(lastMailTo(email)!, "reset-password");
+  const rs = await Promise.all([1, 2, 3, 4].map((i) => new Client().post("/auth/reset-password", { token: t, password: `simultaneous pass ${i}` })));
+  assert.equal(rs.filter((r) => r.status === 200).length, 1);
+  await new Client().post("/auth/forgot-password", { email });
+  const t2 = tokenIn(lastMailTo(email)!, "reset-password");
+  await db.query("update email_tokens set expires_at = now() - interval '1 second' where user_id = (select id from users where email = $1) and used_at is null", [email]);
+  assert.equal((await new Client().post("/auth/reset-password", { token: t2, password: "late password 12345" })).status, 400);
+});
+
+test("forgot-password is rate limited per address", async () => {
+  const email = `rl-${Date.now()}@example.com`;
+  for (let i = 0; i < 3; i++) assert.equal((await new Client().post("/auth/forgot-password", { email })).status, 202);
+  assert.equal((await new Client().post("/auth/forgot-password", { email })).status, 429);
+  assert.equal((await new Client().post("/auth/forgot-password", { email: `other-${Date.now()}@example.com` })).status, 202); // other addresses unaffected
+  resetRateLimits();
+});
+
+test("invites are emailed (HTML escaped); a mail failure does not fail the invite", async () => {
+  const c = new Client();
+  const email = `own-${Date.now()}@example.com`;
+  resetRateLimits();
+  await c.post("/auth/signup", { email, password: "correct horse battery", orgName: "<b>Evil</b> & Co" });
+  const inv = await c.post("/team/invite", { email: "teammate@example.com", role: "analyst" });
+  assert.equal(inv.status, 201); assert.equal(inv.json.emailed, true);
+  const mail = lastMailTo("teammate@example.com")!;
+  assert.ok(mail.text.includes(tokenIn({ text: inv.json.link }, "invite")));
+  assert.ok(mail.html.includes("&lt;b&gt;Evil&lt;/b&gt; &amp; Co")); assert.equal(mail.html.includes("<b>Evil</b>"), false);
+  mailWorks = false;
+  const inv2 = await c.post("/team/invite", { email: "second@example.com", role: "viewer" });
+  mailWorks = true;
+  assert.equal(inv2.status, 201); assert.equal(inv2.json.emailed, false); assert.ok(inv2.json.link.includes("/invite/")); // link still usable
+});
+
+test("Nexora SSO users are verified immediately", async () => {
+  const c = new Client();
+  await c.get(`/auth/sso?token=${signJwt({ sub: `nx-ver-${Date.now()}`, email: `ver-${Date.now()}@example.com`, org: `nx-o-ver-${Date.now()}`, jti: `jti-ver-${Date.now()}` }, "test-sso-secret", 120)}`);
+  assert.equal((await c.get("/auth/me")).json.user.emailVerified, true);
+});
+
+test("Resend adapter: request shape, and failures never throw", async () => {
+  const calls: any[] = [];
+  const ok = resendMailer("re_test_key", "NEXORA CSPM <no-reply@cspm.example.test>", (async (url: string, init: any) => { calls.push({ url, init }); return { ok: true, status: 200 }; }) as any);
+  assert.equal(await ok.send({ to: "a@example.com", subject: "S", text: "T", html: "<p>H</p>" }), true);
+  assert.equal(calls[0].url, "https://api.resend.com/emails");
+  assert.equal(calls[0].init.headers.authorization, "Bearer re_test_key");
+  assert.deepEqual(JSON.parse(calls[0].init.body), { from: "NEXORA CSPM <no-reply@cspm.example.test>", to: ["a@example.com"], subject: "S", text: "T", html: "<p>H</p>" });
+  const rejected = resendMailer("k", "f", (async () => ({ ok: false, status: 422 })) as any);
+  assert.equal(await rejected.send({ to: "a@example.com", subject: "S", text: "T", html: "H" }), false);
+  const down = resendMailer("k", "f", (async () => { throw new Error("ECONNREFUSED"); }) as any);
+  assert.equal(await down.send({ to: "a@example.com", subject: "S", text: "T", html: "H" }), false);
 });
 
 test("CSV export neutralises spreadsheet formulas", async () => {

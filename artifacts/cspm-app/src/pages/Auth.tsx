@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useLocation } from "wouter";
 import { api, ApiError } from "../api";
 import type { Me } from "../App";
@@ -50,6 +50,7 @@ export function AuthPage({ onAuth }: { onAuth: (m: Me) => void }) {
         </label>
         {err && <div id="auth-err" className="err" role="alert">{err}</div>}
         <button className="btn primary lg" disabled={busy} aria-busy={busy}>{busy ? "Please wait…" : signup ? "Create account" : "Sign in"}</button>
+        {!signup && <p style={{ textAlign: "center" }}><Link href="/forgot-password">Forgot your password?</Link></p>}
         <p className="muted" style={{ textAlign: "center" }}>
           {signup ? <>Already have an account? <Link href="/signin">Sign in</Link></> : <>New here? <Link href="/signup">Create an account</Link></>}
         </p>
@@ -85,6 +86,88 @@ export function InvitePage({ token, onDone, signedInSso }: { token: string; onDo
         {err && <div className="err" role="alert">{err}</div>}
         <button className="btn primary lg" disabled={busy}>{busy ? "Please wait…" : "Accept invitation"}</button>
       </form>
+    </div>
+  );
+}
+
+export function ForgotPasswordPage() {
+  const [email, setEmail] = useState("");
+  const [done, setDone] = useState(false);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function submit(e: FormEvent) {
+    e.preventDefault(); setErr(""); setBusy(true);
+    try { await api("POST", "/auth/forgot-password", { email }); setDone(true); } catch (x) { setErr((x as ApiError).message); } finally { setBusy(false); }
+  }
+  return (
+    <div className="auth">
+      <form className="card" onSubmit={submit}>
+        <Brand />
+        <h1>Reset your password</h1>
+        {done ? (
+          <div className="banner" role="status">If an account exists for {email}, we have sent a link to choose a new password. It works for one hour. Check your spam folder if it does not arrive.</div>
+        ) : (
+          <>
+            <p className="muted">Enter your email and we will send you a link.</p>
+            <label className="field">Email<input className="input" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} /></label>
+            {err && <div className="err" role="alert">{err}</div>}
+            <button className="btn primary lg" disabled={busy} aria-busy={busy}>{busy ? "Please wait…" : "Send reset link"}</button>
+          </>
+        )}
+        <p style={{ textAlign: "center" }}><Link href="/signin">Back to sign in</Link></p>
+      </form>
+    </div>
+  );
+}
+
+export function ResetPasswordPage({ token }: { token: string }) {
+  const [password, setPassword] = useState("");
+  const [done, setDone] = useState(false);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function submit(e: FormEvent) {
+    e.preventDefault(); setErr(""); setBusy(true);
+    try { await api("POST", "/auth/reset-password", { token, password }); setDone(true); } catch (x) { setErr((x as ApiError).message); } finally { setBusy(false); }
+  }
+  return (
+    <div className="auth">
+      <form className="card" onSubmit={submit}>
+        <Brand />
+        <h1>Choose a new password</h1>
+        {done ? (
+          <>
+            <div className="banner" role="status">Your password is changed and you are signed out everywhere.</div>
+            <Link href="/signin" className="btn primary lg">Sign in</Link>
+          </>
+        ) : (
+          <>
+            <label className="field">New password<input className="input" type="password" autoComplete="new-password" required minLength={10} value={password} onChange={(e) => setPassword(e.target.value)} aria-describedby="pw-hint" />
+              <span id="pw-hint" className="muted" style={{ fontWeight: 400 }}>At least 10 characters.</span></label>
+            {err && <div className="err" role="alert">{err} {err.includes("invalid or has expired") && <Link href="/forgot-password">Send a new link</Link>}</div>}
+            <button className="btn primary lg" disabled={busy} aria-busy={busy}>{busy ? "Please wait…" : "Change password"}</button>
+          </>
+        )}
+      </form>
+    </div>
+  );
+}
+
+export function VerifyEmailPage({ token }: { token: string }) {
+  const [state, setState] = useState<"working" | "ok" | "bad">("working");
+  const [msg, setMsg] = useState("");
+  useEffect(() => {
+    let alive = true;
+    api("POST", "/auth/verify-email", { token }).then(() => alive && setState("ok")).catch((x: ApiError) => { if (alive) { setMsg(x.message); setState("bad"); } });
+    return () => { alive = false; };
+  }, [token]);
+  return (
+    <div className="auth">
+      <div className="card" role="status" aria-live="polite">
+        <Brand />
+        {state === "working" && <p>Confirming your email…</p>}
+        {state === "ok" && <><h1>Email confirmed</h1><p className="muted">Thanks. You can close this tab or continue.</p><Link href="/" className="btn primary lg">Open the dashboard</Link></>}
+        {state === "bad" && <><h1>That link did not work</h1><p className="err" role="alert">{msg}</p><p className="muted">Sign in and use “Resend” in the banner to get a new link.</p><Link href="/signin" className="btn lg">Sign in</Link></>}
+      </div>
     </div>
   );
 }

@@ -17,6 +17,7 @@ create table users (
   nexora_user_id text unique,
   password_hash text,                       -- null when SSO only
   token_version int not null default 0,     -- bump to sign out everywhere
+  email_verified_at timestamptz,            -- set by the verify link, or by Nexora SSO (Nexora already verified it)
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -170,6 +171,17 @@ create table invites (
   accepted_at timestamptz,
   created_at timestamptz not null default now()
 );
+
+create table email_tokens (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  kind text not null check (kind in ('reset','verify')),
+  token_hash text not null unique,          -- sha256; the token itself exists only in the email
+  expires_at timestamptz not null,
+  used_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index on email_tokens (user_id, kind);
 
 create table sso_tokens (
   jti text primary key,                     -- one-time use of Nexora handoff tokens

@@ -119,6 +119,33 @@ test.describe("F02 account, session, sign in and out", () => {
   });
 });
 
+test.describe("email flows (UI; delivery itself is covered by API tests with a mocked provider)", () => {
+  test("EM-H1 forgot password gives the same answer for any address", async ({ page }) => {
+    await page.goto("/signin");
+    await page.getByRole("link", { name: "Forgot your password?" }).click();
+    await a11y(page, "forgot password");
+    await page.getByLabel("Email").fill(uniqueEmail("nobody"));
+    await page.getByRole("button", { name: "Send reset link" }).click();
+    await expect(page.getByRole("status")).toContainText("If an account exists");
+  });
+  test("EM-N1 an invalid reset or verification link explains what to do", async ({ page }) => {
+    await page.goto("/reset-password/" + "x".repeat(40));
+    await a11y(page, "reset password");
+    await page.getByLabel("New password").fill("a-new-password-123");
+    await page.getByRole("button", { name: "Change password" }).click();
+    await expect(page.getByRole("alert")).toContainText("invalid or has expired");
+    await expect(page.getByRole("link", { name: "Send a new link" })).toBeVisible();
+    await page.goto("/verify-email/" + "y".repeat(40));
+    await expect(page.getByRole("alert")).toContainText("invalid or has expired");
+  });
+  test("EM-H2 new accounts see the confirm-email banner and can resend", async ({ page }) => {
+    const email = await signUp(page);
+    await expect(page.getByText(`We sent a link to`)).toContainText(email);
+    await page.getByRole("button", { name: "Resend email" }).click();
+    await expect(page.getByRole("status")).toContainText("Confirmation email sent");
+  });
+});
+
 test.describe("F03 first scan to dashboard", () => {
   test("F03-H1 empty overview -> sample -> result -> overview numbers, within 4 clicks", async ({ page }) => {
     await signUp(page);

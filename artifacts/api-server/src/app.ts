@@ -5,13 +5,15 @@ import type { Db } from "@workspace/db";
 import { config } from "./config";
 import { logger } from "./lib/logger";
 import { HttpError } from "./lib/errors";
+import { createMailer, type Mailer } from "./services/mail";
 import healthRouter from "./routes/health";
 import authRouter from "./routes/auth";
 import scansRouter from "./routes/scans";
 import findingsRouter from "./routes/findings";
 import teamRouter from "./routes/team";
 
-export function createApp(db: Db): Express {
+export function createApp(db: Db, opts: { mailer?: Mailer } = {}): Express {
+  const mailer = opts.mailer ?? createMailer();
   const app: Express = express();
   app.disable("x-powered-by");
   if (config.trustProxy) app.set("trust proxy", 1);
@@ -35,7 +37,7 @@ export function createApp(db: Db): Express {
   // exact origins only, with credentials. Unlisted origins get no CORS headers.
   app.use(cors({ origin: (o, cb) => cb(null, !o || config.origins.includes(o)), credentials: true, allowedHeaders: ["content-type", "x-csrf", "authorization"], methods: ["GET", "POST", "PATCH", "DELETE"] }));
   app.use(express.json({ limit: "1mb", verify: (req, _res, buf) => { (req as Request).rawBody = buf; } }));
-  app.use((req, _res, next) => { req.db = db; next(); });
+  app.use((req, _res, next) => { req.db = db; req.mailer = mailer; next(); });
 
   app.use("/api", healthRouter, authRouter, scansRouter, findingsRouter, teamRouter);
   app.use("/api", (_req, _res, next) => next(new HttpError(404, "not_found", "Unknown endpoint")));

@@ -7,6 +7,7 @@ import { parse, requireRole, uuidParam } from "../lib/http";
 import { ROLE_RANK, type Role } from "../lib/context";
 import { audit } from "../lib/audit";
 import { usageOf } from "../services/scans";
+import { inviteEmail } from "../services/mail-templates";
 
 const r = Router();
 const role = z.enum(["admin", "analyst", "viewer"]);
@@ -26,8 +27,10 @@ r.post("/team/invite", requireRole("admin"), async (req, res) => {
   const token = randomToken(24);
   await req.db.query("insert into invites (org_id, email, role, token_hash, expires_at) values ($1,$2,$3,$4, now() + interval '7 days')", [o, b.email, b.role, sha256(token)]);
   await audit(req, "team.invite", b.email);
-  // No email provider yet: the link is shown once to the inviter, who sends it.
-  res.status(201).json({ link: `${config.appUrl}/invite/${token}`, email: b.email, role: b.role });
+  const org = (await req.db.query("select name from organizations where id = $1", [o])).rows[0];
+  const emailed = await req.mailer.send(inviteEmail(b.email, token, org.name, b.role, req.auth!.email));
+  // the link is still returned once so the inviter can copy it if the email does not arrive
+  res.status(201).json({ link: `${config.appUrl}/invite/${token}`, email: b.email, role: b.role, emailed });
 });
 
 r.patch("/team/:id", requireRole("admin"), async (req, res) => {

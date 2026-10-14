@@ -24,7 +24,7 @@ Test mode only. No live keys, no third-party accounts created. Variables: see `.
 - Nexora SSO: HS256 token signed with `SSO_SECRET`, lifetime at most 10 minutes, one-time `jti`, role claim capped at admin, first user of a new Nexora org becomes owner
 
 ## Not done, and why
-- **Email verification, password reset, invite emails**: need a mail provider. You create the Resend/Postmark account and domain; until then invites are copy-paste links and password reset is missing. This is the biggest functional gap for launch.
+- **Email**: built on Resend (`services/mail.ts`): confirmation on signup, password reset, invite emails. Tokens are random, stored only as hashes, single use (atomic), reset 1 h, confirm 24 h, newest link wins, reset signs out everywhere and verifies the mailbox; forgot-password answers identically for unknown addresses and is rate limited per IP and per address; provider failures never fail the request. **Not tested against the real provider.** Unverified users are not blocked from anything yet (banner only).
 - **Postgres row level security**: written as a pattern in `schema.sql` but not enabled. Isolation today is the query-level org check, tested. Enabling RLS needs a per-request `set_config('app.org_id')` inside a transaction.
 - **Stripe**: checkout, portal and four webhook events are coded and unit-tested with signed payloads, never run against Stripe. Needs your test-mode keys and a Starter price id.
 - **AWS connector, email, background jobs**: not built (Phase 1b). Nightly snapshot rollup is replaced by writing a snapshot on every scan.

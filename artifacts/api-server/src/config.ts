@@ -30,7 +30,11 @@ export const config = {
   stripeSecret: process.env["STRIPE_SECRET_KEY"] ?? "",
   stripeWebhookSecret: process.env["STRIPE_WEBHOOK_SECRET"] ?? "",
   stripeStarterPrice: process.env["STRIPE_PRICE_STARTER"] ?? "",
+  /** Resend (https://resend.com). Without a key: dev logs emails to the console, production sends nothing. */
+  resendKey: process.env["RESEND_API_KEY"] ?? "",
+  mailFrom: process.env["MAIL_FROM"] ?? "NEXORA CSPM <no-reply@cspm.onenexora.com>",
   anthropicKey: process.env["ANTHROPIC_API_KEY"] ?? "",
   anthropicModel: process.env["ANTHROPIC_MODEL"] ?? "claude-haiku-5-5",
 };
+if (prod && config.resendKey && !process.env["MAIL_FROM"]) throw new Error("MAIL_FROM is required in production when RESEND_API_KEY is set");
 if (prod && config.origins.length === 0) throw new Error("APP_ORIGINS is required in production");

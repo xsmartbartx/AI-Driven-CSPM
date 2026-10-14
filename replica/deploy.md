@@ -22,7 +22,7 @@ Status 2026-10-14: **ready to deploy to staging, not ready for public launch.** 
 | favicon / titles | own, inline SVG; no OG image yet |
 
 ## Blocks launch (public), in order
-1. **Email**: needs a provider account (Resend or Postmark) and a verified sending domain. Until then no password reset, no verification, invites are copy-paste links. Do not launch to the public without at least reset.
+1. **Email**: code is done (Resend; confirmation, reset, invites). You still need to create the Resend account, verify the sending domain and set `RESEND_API_KEY` + `MAIL_FROM`; steps in `replica/email-setup.md`. Without it, production sends nothing and invites are copy-paste links.
 2. **Stripe end to end** in test mode, then live (steps below).
 3. **Nexora SSO handoff**: onenexora.com must mint the token and redirect (below).
 4. **Postgres RLS** switched on (defense in depth). Tenant isolation is already enforced in every query and tested, so this is hardening, not a hole.
@@ -47,13 +47,13 @@ Cookies: the session cookie is set by the API host and sent from the app host. T
 | CNAME | `cspm` | the site host's target (e.g. `<project>.pages.dev`) |
 | CNAME | `app.cspm` | the app host's target |
 | CNAME or A | `api.cspm` | the API host's target or IP |
-| TXT / CNAME | as the email provider shows | SPF, DKIM for the sending domain |
+| TXT / CNAME / MX | exactly as the Resend dashboard shows for your domain | SPF, DKIM and return-path for the sending domain (see `replica/email-setup.md`) |
 | TXT | `_dmarc` | `v=DMARC1; p=none; rua=mailto:<you>@onenexora.com`, tighten to `quarantine` after clean reports |
 
 ## Environment (API container; names in `.env.example`, no values were written anywhere)
-`NODE_ENV=production`, `DATABASE_URL`, `JWT_SECRET` (32+ random bytes), `APP_ORIGINS=https://cspm.onenexora.com,https://app.cspm.onenexora.com`, `APP_URL=https://app.cspm.onenexora.com`, `TRUST_PROXY=1`, `SSO_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_STARTER`, optional `ANTHROPIC_API_KEY`.
+`NODE_ENV=production`, `RESEND_API_KEY`, `MAIL_FROM`, `DATABASE_URL`, `JWT_SECRET` (32+ random bytes), `APP_ORIGINS=https://cspm.onenexora.com,https://app.cspm.onenexora.com`, `APP_URL=https://app.cspm.onenexora.com`, `TRUST_PROXY=1`, `SSO_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_STARTER`, optional `ANTHROPIC_API_KEY`.
 Front-end build vars: `VITE_API_URL=https://api.cspm.onenexora.com` (both), `VITE_APP_URL=https://app.cspm.onenexora.com` (site).
-The API creates tables on first start if they are missing (`lib/db/src/schema.sql`). There is no migration tool yet: for later schema changes add numbered SQL files and a runner first. Back up before changing anything.
+The API creates tables on first start if they are missing (`lib/db/src/schema.sql`). There is no migration tool yet: for later schema changes add numbered SQL files and a runner first. Back up before changing anything. **An existing database created before the email change needs:** `alter table users add column if not exists email_verified_at timestamptz;` plus the `email_tokens` table from `lib/db/src/schema.sql` (a fresh database needs nothing).
 
 ## Stripe (you create; test mode first)
 1. Product "NEXORA CSPM Starter", $19/month recurring → `STRIPE_PRICE_STARTER`.
