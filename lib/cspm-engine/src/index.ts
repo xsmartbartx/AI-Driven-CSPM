@@ -82,8 +82,9 @@ export const RULES: Rule[] = [
     frameworks: ["CIS-AWS 5.2", "PCI-DSS 1.3.2", "NIST-800-53 SC-7", "ISO-27001 A.8.20"],
     check: (r) => {
       const hits = new Set<number>();
-      for (const i of ingressOf(r)) if (isWorld(i.cidr)) sensitiveIn(portsOf(i)).forEach((p) => hits.add(p));
-      return hits.size ? { ports: [...hits].sort((a, b) => a - b).map((p) => `${p} (${SENSITIVE_PORTS[p]})`), cidr: "0.0.0.0/0" } : null;
+      const cidrs = new Set<string>();
+      for (const i of ingressOf(r)) if (isWorld(i.cidr)) { const s = sensitiveIn(portsOf(i)); if (s.length) cidrs.add(String(i.cidr)); s.forEach((p) => hits.add(p)); }
+      return hits.size ? { ports: [...hits].sort((a, b) => a - b).map((p) => `${p} (${SENSITIVE_PORTS[p]})`), cidr: [...cidrs].join(", ") } : null;
     },
   },
   {
@@ -93,7 +94,7 @@ export const RULES: Rule[] = [
     check: (r) => {
       const open = ingressOf(r).filter((i) => isWorld(i.cidr));
       const broad = open.filter((i) => broadExposure(portsOf(i)));
-      return broad.length ? { open_rules: broad.length, cidr: "0.0.0.0/0" } : null;
+      return broad.length ? { open_rules: broad.length, cidr: [...new Set(broad.map((i) => String(i.cidr)))].join(", ") } : null;
     },
   },
   {
@@ -145,7 +146,7 @@ export function severityOf(score: number): Severity {
 
 /** Asset-level risk. v1 inputs: rule base score and asset criticality (1-10, default 5 => x1.0). */
 export function riskScore(base: number, criticality = 5): number {
-  const c = Math.min(10, Math.max(1, criticality));
+  const c = Number.isFinite(criticality) ? Math.min(10, Math.max(1, criticality)) : 5; // never NaN
   return Math.max(0, Math.min(100, Math.round(base * (0.85 + 0.03 * c))));
 }
 
@@ -185,7 +186,8 @@ export function evaluate(resources: Resource[]): { findings: Finding[]; unknownT
       if (rule.resourceType !== r.type) continue;
       const evidence = rule.check(r);
       if (!evidence) continue;
-      const score = riskScore(rule.base, r.criticality ?? defaultCriticality(r));
+      const crit = Number(r.criticality); // a non-numeric criticality (e.g. "high") falls back to the environment default
+      const score = riskScore(rule.base, Number.isFinite(crit) ? crit : defaultCriticality(r));
       findings.push({
         ruleId: rule.id, title: rule.title, severity: severityOf(score), riskScore: score,
         resourceType: r.type, resourceName: r.name, evidence, remediation: rule.remediation, frameworks: rule.frameworks,

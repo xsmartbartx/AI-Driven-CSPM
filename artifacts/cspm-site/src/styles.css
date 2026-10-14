@@ -40,5 +40,6 @@ code{font-family:var(--font-mono);font-size:.92em;background:var(--surface-2);pa
 .docs pre.code{margin:12px 0}
 pre.code{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px;font:13px/20px var(--font-mono);overflow:auto;white-space:pre-wrap}
 .docs h3{font:600 20px var(--font-sans);margin:32px 0 8px}
-@media (max-width:860px){.steps,.demo,.rules{grid-template-columns:1fr}.price-grid{grid-template-columns:repeat(2,1fr)}.nav .hide-s{display:none}}
+@media (max-width:860px){.steps,.demo,.rules{grid-template-columns:1fr}.price-grid{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:640px){.nav .wrap{gap:12px}.nav .brand-text,.nav .hide-s{display:none}}
 @media (max-width:520px){.price-grid{grid-template-columns:1fr}.hero{padding:56px 0 32px}}

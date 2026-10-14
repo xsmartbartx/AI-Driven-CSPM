@@ -151,9 +151,11 @@ export function Settings() {
       </section>
       {del && (
         <Dialog title="Delete your account" onClose={() => setDel(false)}>
-          <form style={{ display: "grid", gap: 16 }} onSubmit={async (e) => { e.preventDefault(); setDelErr(""); try { await api("DELETE", "/auth/me", { password: delPw }); setMe(null); } catch (x) { setDelErr((x as ApiError).message); } }}>
+          <form style={{ display: "grid", gap: 16 }} onSubmit={async (e) => { e.preventDefault(); setDelErr(""); try { await api("DELETE", "/auth/me", me.user.hasPassword ? { password: delPw } : { confirmEmail: delPw }); setMe(null); } catch (x) { setDelErr((x as ApiError).message); } }}>
             <p>This permanently deletes your account. If you are the only member of your organization, its scans and findings are deleted too. This cannot be undone.</p>
-            <label className="field">Confirm with your password<input className="input" type="password" autoComplete="current-password" required value={delPw} onChange={(e) => setDelPw(e.target.value)} /></label>
+            {me.user.hasPassword
+              ? <label className="field">Confirm with your password<input className="input" type="password" autoComplete="current-password" required value={delPw} onChange={(e) => setDelPw(e.target.value)} /></label>
+              : <label className="field">Type your email address ({me.user.email}) to confirm<input className="input" type="email" autoComplete="off" required value={delPw} onChange={(e) => setDelPw(e.target.value)} /></label>}
             {delErr && <div className="err" role="alert">{delErr}</div>}
             <div className="row" style={{ justifyContent: "flex-end" }}><button type="button" className="btn" onClick={() => setDel(false)}>Cancel</button><button className="btn danger">Delete permanently</button></div>
           </form>

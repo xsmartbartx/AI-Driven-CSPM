@@ -73,13 +73,22 @@ r.post("/findings/:id/explain", requireRole("analyst"), async (req, res) => {
      from findings f join assets a on a.id = f.asset_id where f.id = $1 and f.org_id = $2`, [id, orgId]);
   if (!rows[0]) throw notFound("Finding not found");
   if (cached.rows[0] && !req.body?.refresh) return void res.json(cached.rows[0]);
-  const u = await usageOf(req.db, orgId);
-  if (u.ai.used >= u.ai.limit) throw new HttpError(402, "quota_exceeded", `You have used all ${PLANS[u.plan].ai} AI explanations on the ${u.planLabel} plan this month.`);
-  const out = await explainFinding(rows[0] as any);
-  await req.db.tx(async (q) => {
-    await q.query("insert into ai_briefs (org_id, finding_id, kind, content, model) values ($1,$2,'finding',$3,$4)", [orgId, id, out.text, out.model]);
-    await q.query("insert into usage_events (org_id, kind, period) values ($1,'ai',$2)", [orgId, period()]);
+  // Reserve the quota BEFORE the slow, paid call: lock the org row, check, insert. Concurrent calls queue on the lock,
+  // so they cannot all pass the check. A failed generation gives the reservation back.
+  const reservation: string = await req.db.tx(async (q) => {
+    await q.query("select 1 from organizations where id = $1 for update", [orgId]);
+    const u = await usageOf(q, orgId);
+    if (u.ai.used >= u.ai.limit) throw new HttpError(402, "quota_exceeded", `You have used all ${PLANS[u.plan].ai} AI explanations on the ${u.planLabel} plan this month.`);
+    return (await q.query("insert into usage_events (org_id, kind, period) values ($1,'ai',$2) returning id", [orgId, period()])).rows[0]!.id;
   });
+  let out;
+  try {
+    out = await explainFinding(rows[0] as any);
+    await req.db.query("insert into ai_briefs (org_id, finding_id, kind, content, model) values ($1,$2,'finding',$3,$4)", [orgId, id, out.text, out.model]);
+  } catch (e) {
+    await req.db.query("delete from usage_events where id = $1", [reservation]).catch(() => {});
+    throw e;
+  }
   res.json({ content: out.text, model: out.model, createdAt: new Date().toISOString() });
 });
 

@@ -35,6 +35,19 @@ test("security group: all-ports world rule is sensitive; 443 alone is fine; 8080
   assert.deepEqual(f([{ cidr: "0.0.0.0/0", fromPort: 20, toPort: 25 }]).sort(), ["sg-open-world", "sg-sensitive-port-open"]);
 });
 
+test("evidence reports the CIDR that actually matched, IPv6 included", () => {
+  const f = evaluate([{ type: "security_group", name: "g", ingress: [{ cidr: "::/0", port: 22 }, { cidr: "0.0.0.0/0", port: 8080 }] }]).findings;
+  assert.equal(f.find((x) => x.ruleId === "sg-sensitive-port-open")!.evidence["cidr"], "::/0");
+  assert.equal(f.find((x) => x.ruleId === "sg-open-world")!.evidence["cidr"], "0.0.0.0/0");
+});
+
+test("non-numeric criticality never produces NaN", () => {
+  const f = evaluate([{ type: "s3_bucket", name: "b", public_read: true, criticality: "high", environment: "production" } as any]).findings[0]!;
+  assert.ok(Number.isInteger(f.riskScore) && f.riskScore >= 0 && f.riskScore <= 100);
+  assert.equal(f.riskScore, riskScore(85, 8));
+  assert.equal(riskScore(50, NaN), 50);
+});
+
 test("risk scale and severity thresholds", () => {
   assert.equal(riskScore(85, 5), 85);
   assert.equal(riskScore(100, 10), 100);

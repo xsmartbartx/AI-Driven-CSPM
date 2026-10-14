@@ -24,5 +24,6 @@ jobs:
       - run: pnpm --filter @workspace/api-server test            # real Postgres
         env: { TEST_DATABASE_URL: "postgres://postgres:ci@localhost:5432/cspm" }
       - run: pnpm --filter @workspace/cspm-site build && pnpm --filter @workspace/cspm-app build && pnpm --filter @workspace/api-server build
+        env: { VITE_APP_URL: "https://app.cspm.example.test", VITE_API_URL: "https://api.cspm.example.test" }
       - run: npx playwright test
         working-directory: e2e

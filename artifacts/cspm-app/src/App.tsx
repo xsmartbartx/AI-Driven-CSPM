@@ -11,7 +11,7 @@ import { Planned } from "./pages/Planned";
 import { AuthPage, InvitePage } from "./pages/Auth";
 
 export type Role = "owner" | "admin" | "analyst" | "viewer";
-export interface Me { user: { id: string; email: string; name: string | null }; org: { id: string; name: string; plan: string }; role: Role }
+export interface Me { user: { id: string; email: string; name: string | null; hasPassword: boolean }; org: { id: string; name: string; plan: string }; role: Role }
 interface Ctx { me: Me; setMe: (m: Me | null) => void; can: (min: Role) => boolean; toast: (m: string) => void }
 const RANK: Record<Role, number> = { viewer: 1, analyst: 2, admin: 3, owner: 4 };
 const C = createContext<Ctx>(null as never);

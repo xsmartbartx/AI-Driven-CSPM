@@ -6,6 +6,8 @@ import type { Server } from "node:http";
 process.env["SSO_SECRET"] = "test-sso-secret";
 process.env["STRIPE_WEBHOOK_SECRET"] = "whsec_test";
 process.env["APP_ORIGINS"] = "http://localhost:5174";
+process.env["STRIPE_SECRET_KEY"] = "sk_test_dummy_never_called";
+process.env["STRIPE_PRICE_STARTER"] = "price_dummy";
 process.env["NODE_ENV"] = "test";
 
 const { openDb } = await import("@workspace/db");
@@ -415,14 +417,85 @@ test("Stripe: subscription lifecycle events; a failed handler is not marked seen
   assert.equal((await db.query("select 1 from stripe_events where id = $1", [evId])).rows.length, 0);
 });
 
-test("billing portal needs a subscription and Stripe keys", async () => {
-  const { c } = await signup();
-  assert.equal((await c.post("/billing/portal")).status, 503);
+test("billing: no portal without a subscription; second checkout is refused for a paid org", async () => {
+  const { c, me } = await signup();
+  assert.equal((await c.post("/billing/portal")).json.error.code, "no_subscription");
+  await db.query("update organizations set plan = 'starter' where id = $1", [me.org.id]);
+  const r = await c.post("/billing/checkout");
+  assert.equal(r.status, 409);
+  assert.equal(r.json.error.code, "already_subscribed");
 });
 
-test("billing checkout is a clear 503 until Stripe keys are set", async () => {
+test("invite acceptance by an existing user who signed out everywhere still yields a working session", async () => {
+  const a = await signup();
+  const b = await signup();
+  assert.equal((await b.c.post("/auth/logout-all")).status, 200); // bumps b's token_version
+  const inv = await a.c.post("/team/invite", { email: b.email, role: "viewer" });
+  const c = new Client();
+  const acc = await c.post("/invites/accept", { token: inv.json.link.split("/invite/")[1], password: "correct horse battery" });
+  assert.equal(acc.status, 201);
+  assert.equal((await c.get("/auth/me")).status, 200); // used to be 401: cookie carried version 0
+});
+
+test("SSO-only accounts can delete themselves by typing their email", async () => {
+  const tok = signJwt({ sub: "nx-del-1", email: "sso-del@example.com", org: "nx-org-del", orgName: "Del", jti: `jti-del-${Date.now()}` }, "test-sso-secret", 120);
+  const c = new Client();
+  await c.get(`/auth/sso?token=${tok}`);
+  assert.equal((await c.get("/auth/me")).json.user.hasPassword, false);
+  assert.equal((await c.call("DELETE", "/auth/me", { password: "anything" })).status, 400);
+  assert.equal((await c.call("DELETE", "/auth/me", { confirmEmail: "someone-else@example.com" })).status, 400);
+  assert.equal((await c.call("DELETE", "/auth/me", { confirmEmail: "SSO-Del@example.com" })).status, 200);
+  assert.equal((await db.query("select 1 from users where email = 'sso-del@example.com'")).rows.length, 0);
+});
+
+test("AI quota cannot be exceeded by concurrent explain calls; a failed run is not charged", async () => {
   const { c } = await signup();
-  assert.equal((await c.post("/billing/checkout")).json.error.code, "billing_not_configured");
+  await c.post("/scans", { config: SAMPLE_CONFIG });
+  const f = (await c.get("/findings")).json.items[0];
+  const rs = await Promise.all(Array.from({ length: 14 }, () => c.call("POST", `/findings/${f.id}/explain`, { refresh: true })));
+  assert.equal(rs.filter((r) => r.status === 200).length, 10);
+  assert.equal(rs.filter((r) => r.status === 402).length, 4);
+  assert.equal((await c.get("/usage")).json.ai.used, 10);
+});
+
+test("two owners cannot demote each other at the same time (last owner survives)", async () => {
+  const { c: a } = await signup();
+  const inv = await a.post("/team/invite", { email: "owner-b@example.com", role: "admin" });
+  const b = new Client();
+  await b.post("/invites/accept", { token: inv.json.link.split("/invite/")[1], password: "owner b password 1" });
+  const team = (await a.get("/team")).json;
+  const am = team.members.find((m: any) => m.role === "owner"), bm = team.members.find((m: any) => m.email === "owner-b@example.com");
+  assert.equal((await a.patch(`/team/${bm.id}`, { role: "owner" })).status, 200);
+  const [r1, r2] = await Promise.all([a.patch(`/team/${bm.id}`, { role: "viewer" }), b.patch(`/team/${am.id}`, { role: "viewer" })]);
+  assert.equal([r1, r2].filter((r) => r.status === 200).length, 1);
+  const owners = (await db.query("select count(*)::int as n from members where org_id = (select org_id from members where id = $1) and role = 'owner'", [am.id])).rows[0]!.n;
+  assert.equal(owners, 1);
+});
+
+test("Stripe: out-of-order events and multiple v1 signatures", async () => {
+  const { me } = await signup();
+  const sigFor = (b: string, t: number, secret = "whsec_test") => createHmac("sha256", secret).update(`${t}.${b}`).digest("hex");
+  const send = (ev: object, header?: (b: string, t: number) => string) => {
+    const b = JSON.stringify(ev); const t = Math.floor(Date.now() / 1000);
+    return fetch(base + "/billing/webhook", { method: "POST", headers: { "content-type": "application/json", "stripe-signature": header ? header(b, t) : `t=${t},v1=${sigFor(b, t)}` }, body: b });
+  };
+  const org = async () => (await db.query("select plan, stripe_customer_id from organizations where id = $1", [me.org.id])).rows[0]!;
+  const T = Math.floor(Date.now() / 1000);
+  // the cancellation (newer) arrives BEFORE the checkout (older)
+  assert.equal((await send({ id: `evt_${Math.random()}`, created: T + 10, type: "customer.subscription.deleted", data: { object: { customer: "cus_ooo" } } })).status, 200);
+  assert.equal((await send({ id: `evt_${Math.random()}`, created: T, type: "checkout.session.completed", data: { object: { client_reference_id: me.org.id, customer: "cus_ooo" } } })).status, 200);
+  const o = await org();
+  assert.equal(o.stripe_customer_id, "cus_ooo");
+  assert.equal(o.plan, "free"); // the late checkout did not resurrect the cancelled subscription
+  // a newer event still wins
+  await send({ id: `evt_${Math.random()}`, created: T + 20, type: "customer.subscription.updated", data: { object: { customer: "cus_ooo", status: "active" } } });
+  assert.equal((await org()).plan, "starter");
+  // rotation: several v1 entries, only one valid, in either position
+  const ev = () => ({ id: `evt_${Math.random()}`, created: T + 30, type: "customer.subscription.deleted", data: { object: { customer: "cus_ooo" } } });
+  assert.equal((await send(ev(), (b, t) => `t=${t},v1=${"0".repeat(64)},v1=${sigFor(b, t)}`)).status, 200);
+  assert.equal((await org()).plan, "free");
+  assert.equal((await send(ev(), (b, t) => `t=${t},v1=${sigFor(b, t)},v1=${"0".repeat(64)}`)).status, 200);
+  assert.equal((await send(ev(), (b, t) => `t=${t},v1=${"0".repeat(64)},v1=${sigFor(b, t, "wrong")}`)).status, 400);
 });
 
 test("CSV export neutralises spreadsheet formulas", async () => {

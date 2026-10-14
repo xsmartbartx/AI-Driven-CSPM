@@ -23,20 +23,24 @@ export async function openDb(opts: { url?: string; dataDir?: string } = {}): Pro
   if (opts.url) {
     const { default: pg } = await import("pg");
     const pool = new pg.Pool({ connectionString: opts.url, max: 10 });
+    // an idle client can drop (restart, failover); without a listener Node would crash the process on the pool "error" event
+    pool.on("error", (err) => console.error("postgres pool error", err.message));
     const db: Db = {
       query: (sql, params) => pool.query(sql, params as any) as any,
       async tx(fn) {
         const c = await pool.connect();
+        let broken: Error | undefined;
         try {
           await c.query("begin");
           const r = await fn({ query: (s, p) => c.query(s, p as any) as any });
           await c.query("commit");
           return r;
         } catch (e) {
-          await c.query("rollback");
+          // keep the ORIGINAL error even if rollback fails on a dead connection, and do not reuse that connection
+          await c.query("rollback").catch((re: Error) => { broken = re; });
           throw e;
         } finally {
-          c.release();
+          c.release(broken);
         }
       },
       close: () => pool.end(),

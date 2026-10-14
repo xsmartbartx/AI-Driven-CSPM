@@ -177,6 +177,12 @@ create table sso_tokens (
   expires_at timestamptz not null
 );
 
+create table billing_state (
+  customer text primary key,                -- Stripe customer id
+  plan text not null check (plan in ('free','starter','team','enterprise')),
+  event_at timestamptz not null             -- time of the newest Stripe event applied; older events are ignored
+);
+
 create table stripe_events (
   id text primary key,                      -- idempotency: webhooks arrive twice
   received_at timestamptz not null default now()

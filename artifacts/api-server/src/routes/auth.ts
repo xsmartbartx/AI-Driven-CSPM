@@ -13,10 +13,10 @@ const password = z.string().min(10, "Use at least 10 characters").max(200);
 
 const meOf = async (req: any, userId: string, orgId: string) => {
   const { rows } = await req.db.query(
-    `select u.id as "userId", u.email, u.name, o.id as "orgId", o.name as "orgName", o.plan, m.role
+    `select u.id as "userId", u.email, u.name, (u.password_hash is not null) as "hasPassword", o.id as "orgId", o.name as "orgName", o.plan, m.role
      from members m join users u on u.id = m.user_id join organizations o on o.id = m.org_id where m.user_id = $1 and m.org_id = $2`, [userId, orgId]);
   const x = rows[0];
-  return { user: { id: x.userId, email: x.email, name: x.name }, org: { id: x.orgId, name: x.orgName, plan: x.plan }, role: x.role };
+  return { user: { id: x.userId, email: x.email, name: x.name, hasPassword: x.hasPassword }, org: { id: x.orgId, name: x.orgName, plan: x.plan }, role: x.role };
 };
 
 r.post("/auth/signup", rateLimit("signup", 10, 3600_000), async (req, res) => {
@@ -90,11 +90,13 @@ r.post("/invites/accept", rateLimit("invite", 20, 3600_000), async (req, res) =>
   const { rows } = await req.db.query("select id, org_id, email, role, expires_at, accepted_at from invites where token_hash = $1", [sha256(b.token)]);
   const inv = rows[0];
   if (!inv || inv.accepted_at || new Date(inv.expires_at) < new Date()) throw bad("This invitation is invalid or has expired", "invite_invalid");
-  const ex = (await req.db.query("select id, password_hash from users where email = $1", [inv.email])).rows[0];
+  const ex = (await req.db.query("select id, password_hash, token_version from users where email = $1", [inv.email])).rows[0];
   let userId: string;
+  let version = 0; // an existing user may have signed out everywhere: the new cookie must carry their current version
   if (ex) {
     if (!(await verifyPassword(b.password, ex.password_hash))) throw unauthorized("Email or password is incorrect");
     userId = ex.id;
+    version = ex.token_version;
   } else {
     userId = (await req.db.query("insert into users (email, name, password_hash) values ($1,$2,$3) returning id", [inv.email, b.name ?? null, await hashPassword(b.password)])).rows[0].id;
   }
@@ -102,7 +104,7 @@ r.post("/invites/accept", rateLimit("invite", 20, 3600_000), async (req, res) =>
     await q.query("insert into members (org_id, user_id, role) values ($1,$2,$3) on conflict (org_id, user_id) do nothing", [inv.org_id, userId, inv.role]);
     await q.query("update invites set accepted_at = now() where id = $1", [inv.id]);
   });
-  setSession(res, userId, inv.org_id);
+  setSession(res, userId, inv.org_id, version);
   await audit(req, "team.invite_accepted", inv.email, req.db, { userId, orgId: inv.org_id, role: inv.role, email: inv.email, via: "session" });
   res.status(201).json(await meOf(req, userId, inv.org_id));
 });
@@ -121,9 +123,14 @@ r.post("/auth/logout-all", async (req, res) => {
 r.delete("/auth/me", async (req, res) => {
   const a = await loadAuth(req);
   if (!a?.userId) throw unauthorized();
-  const b = parse(z.object({ password: z.string().min(1).max(200) }), req.body);
-  const u = (await req.db.query("select password_hash from users where id = $1", [a.userId])).rows[0];
-  if (!(await verifyPassword(b.password, u?.password_hash ?? null))) throw unauthorized("Password is incorrect");
+  const b = parse(z.object({ password: z.string().max(200).optional(), confirmEmail: z.string().max(254).optional() }), req.body);
+  const u = (await req.db.query("select password_hash, email from users where id = $1", [a.userId])).rows[0];
+  if (u?.password_hash) {
+    if (!b.password || !(await verifyPassword(b.password, u.password_hash))) throw unauthorized("Password is incorrect");
+  } else if ((b.confirmEmail ?? "").trim().toLowerCase() !== u?.email) {
+    // Nexora SSO accounts have no password: they confirm by typing their email address
+    throw bad("Type your email address to confirm", "confirmation_required");
+  }
   await req.db.tx(async (q) => {
     const orgs = (await q.query("select org_id, role from members where user_id = $1", [a.userId])).rows;
     for (const m of orgs) {

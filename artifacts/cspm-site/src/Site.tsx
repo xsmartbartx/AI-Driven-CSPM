@@ -21,15 +21,15 @@ function Nav() {
       <div className="wrap">
         <Link href="/" className="brand">
           <svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)" /><path d="M16 6l8 3v7c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V9z" fill="none" stroke="var(--on-accent)" strokeWidth="2" /></svg>
-          NEXORA CSPM
+          <span className="brand-text">NEXORA CSPM</span>
         </Link>
-        <nav className="row hide-s" style={{ gap: 20 }} aria-label="Site">
+        <nav className="row" style={{ gap: 16 }} aria-label="Site">
           <Link href="/" className="link" aria-current={cur("/")}>Product</Link>
           <Link href="/pricing" className="link" aria-current={cur("/pricing")}>Pricing</Link>
           <Link href="/docs" className="link" aria-current={cur("/docs")}>Docs</Link>
         </nav>
         <span className="grow" />
-        <a className="link" href={`${APP}/signin`}>Sign in</a>
+        <a className="link hide-s" href={`${APP}/signin`}>Sign in</a>
         <a className="btn primary" href={`${APP}/signup`}>Start free</a>
       </div>
     </header>

@@ -33,29 +33,37 @@ r.post("/team/invite", requireRole("admin"), async (req, res) => {
 r.patch("/team/:id", requireRole("admin"), async (req, res) => {
   const id = uuidParam(req.params["id"]);
   const b = parse(z.object({ role: z.enum(["owner", "admin", "analyst", "viewer"]) }), req.body);
-  const target = (await req.db.query("select role from members where id = $1 and org_id = $2", [id, req.auth!.orgId])).rows[0];
-  if (!target) throw notFound("Member not found");
-  // only an owner can grant or change the owner role
-  if ((b.role === "owner" || target.role === "owner") && req.auth!.role !== "owner") throw forbidden("Only an owner can change owners");
-  if (target.role === "owner" && b.role !== "owner") {
-    const n = (await req.db.query("select count(*)::int as n from members where org_id = $1 and role = 'owner'", [req.auth!.orgId])).rows[0].n;
-    if (n <= 1) throw bad("An organization needs at least one owner", "last_owner");
-  }
-  await req.db.query("update members set role = $3, updated_at = now() where id = $1 and org_id = $2", [id, req.auth!.orgId, b.role]);
+  const orgId = req.auth!.orgId;
+  // lock the org row so two concurrent requests cannot each see "two owners" and both remove one
+  await req.db.tx(async (q) => {
+    await q.query("select 1 from organizations where id = $1 for update", [orgId]);
+    const target = (await q.query("select role from members where id = $1 and org_id = $2", [id, orgId])).rows[0];
+    if (!target) throw notFound("Member not found");
+    if ((b.role === "owner" || target.role === "owner") && req.auth!.role !== "owner") throw forbidden("Only an owner can change owners");
+    if (target.role === "owner" && b.role !== "owner") {
+      const n = (await q.query("select count(*)::int as n from members where org_id = $1 and role = 'owner'", [orgId])).rows[0].n;
+      if (n <= 1) throw bad("An organization needs at least one owner", "last_owner");
+    }
+    await q.query("update members set role = $3, updated_at = now() where id = $1 and org_id = $2", [id, orgId, b.role]);
+  });
   await audit(req, "team.role_changed", `${id}:${b.role}`);
   res.json({ ok: true });
 });
 
 r.delete("/team/:id", requireRole("admin"), async (req, res) => {
   const id = uuidParam(req.params["id"]);
-  const target = (await req.db.query("select role from members where id = $1 and org_id = $2", [id, req.auth!.orgId])).rows[0];
-  if (!target) throw notFound("Member not found");
-  if (target.role === "owner") {
-    if (req.auth!.role !== "owner") throw forbidden("Only an owner can remove an owner");
-    const n = (await req.db.query("select count(*)::int as n from members where org_id = $1 and role = 'owner'", [req.auth!.orgId])).rows[0].n;
-    if (n <= 1) throw bad("An organization needs at least one owner", "last_owner");
-  }
-  await req.db.query("delete from members where id = $1 and org_id = $2", [id, req.auth!.orgId]);
+  const orgId = req.auth!.orgId;
+  await req.db.tx(async (q) => {
+    await q.query("select 1 from organizations where id = $1 for update", [orgId]);
+    const target = (await q.query("select role from members where id = $1 and org_id = $2", [id, orgId])).rows[0];
+    if (!target) throw notFound("Member not found");
+    if (target.role === "owner") {
+      if (req.auth!.role !== "owner") throw forbidden("Only an owner can remove an owner");
+      const n = (await q.query("select count(*)::int as n from members where org_id = $1 and role = 'owner'", [orgId])).rows[0].n;
+      if (n <= 1) throw bad("An organization needs at least one owner", "last_owner");
+    }
+    await q.query("delete from members where id = $1 and org_id = $2", [id, orgId]);
+  });
   await audit(req, "team.removed", id);
   res.json({ ok: true });
 });
@@ -97,10 +105,14 @@ r.get("/usage", requireRole("viewer"), async (req, res) => res.json({ ...(await 
 // ---- billing (Stripe, test mode until you swap keys) ----
 r.post("/billing/checkout", requireRole("owner"), async (req, res) => {
   if (!config.stripeSecret || !config.stripeStarterPrice) throw new HttpError(503, "billing_not_configured", "Billing is not set up yet");
+  const org = (await req.db.query("select plan, stripe_customer_id from organizations where id = $1", [req.auth!.orgId])).rows[0];
+  // a second subscription would keep billing while the first is forgotten: send subscribed orgs to the portal
+  if (org.plan !== "free") throw conflict("This organization already has a paid plan. Manage it in the billing portal.", "already_subscribed");
   const body = new URLSearchParams({
     mode: "subscription", "line_items[0][price]": config.stripeStarterPrice, "line_items[0][quantity]": "1",
     client_reference_id: req.auth!.orgId, success_url: `${config.appUrl}/usage?upgraded=1`, cancel_url: `${config.appUrl}/usage`,
   });
+  if (org.stripe_customer_id) body.set("customer", org.stripe_customer_id); // reuse the customer, do not create a second one
   const s = await fetch("https://api.stripe.com/v1/checkout/sessions", { method: "POST", headers: { authorization: `Bearer ${config.stripeSecret}`, "content-type": "application/x-www-form-urlencoded" }, body, signal: AbortSignal.timeout(15000) });
   const j: any = await s.json();
   if (!s.ok || !j.url) throw new HttpError(502, "billing_error", "Could not start checkout");
@@ -109,10 +121,13 @@ r.post("/billing/checkout", requireRole("owner"), async (req, res) => {
 });
 
 export function verifyStripeSignature(raw: Buffer, header: string, secret: string, now = Date.now()): boolean {
-  const parts = Object.fromEntries(header.split(",").map((p) => p.split("=") as [string, string]));
-  const t = Number(parts["t"]);
-  if (!t || Math.abs(now / 1000 - t) > 300 || !parts["v1"]) return false;
-  return verifyHmacHex(secret, `${t}.${raw.toString("utf8")}`, parts["v1"]);
+  // during secret rotation Stripe sends one v1 per active secret: accept if ANY verifies
+  const pairs = header.split(",").map((p) => p.split("=") as [string, string]);
+  const t = Number(pairs.find(([k]) => k === "t")?.[1]);
+  const sigs = pairs.filter(([k]) => k === "v1").map(([, v]) => v);
+  if (!t || Math.abs(now / 1000 - t) > 300 || sigs.length === 0) return false;
+  const signed = `${t}.${raw.toString("utf8")}`;
+  return sigs.some((v) => verifyHmacHex(secret, signed, v));
 }
 
 r.post("/billing/portal", requireRole("owner"), async (req, res) => {
@@ -135,16 +150,29 @@ r.post("/billing/webhook", async (req, res) => {
     const first = await q.query("insert into stripe_events (id) values ($1) on conflict do nothing returning id", [ev.id]);
     if (!first.rows[0]) return true;
     const obj = ev.data?.object ?? {};
-    if (ev.type === "checkout.session.completed" && obj.client_reference_id)
-      await q.query("update organizations set plan = 'starter', stripe_customer_id = $2, updated_at = now() where id = $1", [obj.client_reference_id, obj.customer ?? null]);
-    // subscription ended or unpaid: back to free. past_due keeps access while Stripe retries the card.
-    if (obj.customer && (ev.type === "customer.subscription.deleted" || (ev.type === "customer.subscription.updated" && ["canceled", "unpaid", "incomplete_expired"].includes(obj.status))))
-      await q.query("update organizations set plan = 'free', updated_at = now() where stripe_customer_id = $1", [obj.customer]);
-    if (ev.type === "customer.subscription.updated" && obj.customer && ["active", "trialing"].includes(obj.status))
-      await q.query("update organizations set plan = 'starter', updated_at = now() where stripe_customer_id = $1 and plan = 'free'", [obj.customer]);
-    if (ev.type === "invoice.payment_failed" && obj.customer) {
-      const o = (await q.query("select id from organizations where stripe_customer_id = $1", [obj.customer])).rows[0];
-      if (o) await q.query("insert into audit_events (org_id, action, target) values ($1,'billing.payment_failed',$2)", [o.id, String(obj.id ?? "")]);
+    // Stripe does not guarantee delivery order. Keep the newest known state per customer (by event time) and
+    // derive the organization's plan from it, so a late "checkout completed" cannot undo an earlier cancellation.
+    const at = Number(ev.created) || Math.floor(Date.now() / 1000);
+    const customer: string | undefined = obj.customer ?? undefined;
+    const setState = (plan: string) => q.query(
+      "insert into billing_state (customer, plan, event_at) values ($1,$2,to_timestamp($3)) on conflict (customer) do update set plan = excluded.plan, event_at = excluded.event_at where billing_state.event_at <= excluded.event_at",
+      [customer, plan, at]);
+    const apply = () => q.query("update organizations set plan = (select plan from billing_state where customer = $1), updated_at = now() where stripe_customer_id = $1", [customer]);
+    if (customer) {
+      if (ev.type === "checkout.session.completed" && obj.client_reference_id) {
+        await setState("starter");
+        await q.query("update organizations set stripe_customer_id = $2 where id = $1", [obj.client_reference_id, customer]);
+        await apply();
+      } else if (ev.type === "customer.subscription.deleted" || (ev.type === "customer.subscription.updated" && ["canceled", "unpaid", "incomplete_expired"].includes(obj.status))) {
+        await setState("free");
+        await apply();
+      } else if (ev.type === "customer.subscription.updated" && ["active", "trialing"].includes(obj.status)) {
+        await setState("starter");
+        await apply();
+      } else if (ev.type === "invoice.payment_failed") {
+        const o = (await q.query("select id from organizations where stripe_customer_id = $1", [customer])).rows[0];
+        if (o) await q.query("insert into audit_events (org_id, action, target) values ($1,'billing.payment_failed',$2)", [o.id, String(obj.id ?? "")]);
+      }
     }
     return false;
   });
