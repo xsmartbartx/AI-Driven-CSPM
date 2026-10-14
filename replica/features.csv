@@ -1,0 +1,43 @@
+feature,area,priority,original,clone,notes
+Paste JSON config scan (S3 SG IAM DB rules),scan,must,yes (nexora beta),yes,parity with live Beta first
+Scan quota per plan (10 / 75),billing,must,yes,yes,UsageEvent counters
+Findings list with severity filters and search,findings,must,partial,yes,S07
+Finding detail with fix guidance,findings,must,yes,yes,S08
+Finding status (open fixed accepted false positive),findings,must,no,yes,accepted needs reason+expiry
+Overview dashboard (score KPIs trend top actions),dashboard,must,no,yes,S06 Defender style
+Risk score 0-100 per finding,risk,must,no,yes,v1 simplified formula
+Scan history and new/fixed diff,scan,should,no,yes,S10
+SSO redirect from Nexora console,auth,must,no,partial,token endpoint built+tested; Nexora must sign tokens and link here (needs SSO_SECRET)
+Multi-tenant orgs with RLS isolation,auth,must,no,partial,app-level org scoping tested with 2 orgs; Postgres RLS policies NOT yet enabled (schema comment only)
+RBAC owner admin analyst viewer,auth,must,no,yes,S18
+Audit log,security,should,no,yes,S20
+Locked CORS + rate limit + security headers,security,must,no,yes,fix app.use(cors())
+Usage and plan page + Stripe upgrade,billing,must,partial (Starter $19),partial,checkout+webhook coded and unit-tested; not run against real Stripe (needs keys)
+Marketing site with pricing and docs,site,must,partial,yes,S01-S03
+Onboarding with sample config,onboarding,should,no,yes,S05
+Risk trend snapshots 30d/3m/6m,dashboard,should,no,yes,RiskSnapshot daily
+Asset inventory,assets,should,no,yes,S11
+Compliance frameworks (CIS NIST ISO PCI GDPR) mapped by control ID,compliance,should,no,yes,S12 no licensed text
+AI explanation per finding,ai,should,no,yes,rule-grounded text; LLM used only if ANTHROPIC_API_KEY set (untested live)
+AI daily security brief,ai,could,no,no,S14
+AI Q&A over own findings,ai,could,no,no,tenant-scoped retrieval
+AWS read-only account connection (role + external ID),integrations,should,roadmap,no,F07 phase 1b
+Azure and GCP connectors,integrations,could,no,no,phase 2
+Kubernetes checks,integrations,could,no,no,phase 2
+Attack path analysis,attack-paths,could,no,no,phase 2 graph
+Executive PDF/CSV reports,reports,could,no,partial,CSV only
+Notifications (email Slack),notify,could,no,no,
+API keys and public REST API,api,should,partial,yes,orval pipeline exists
+Terraform fix generation and PR,remediation,could,no,no,phase 3
+Internal admin portal,admin,could,no,no,separate surface
+Light and dark theme,design,should,no,yes,Apple-style tokens
+Microsoft Secure Score algorithm,skip,could,yes,skip,proprietary; own score instead
+Threat-intelligence feeds,skip,could,yes,skip,licensed data
+Licensed compliance benchmark text,skip,could,yes,skip,map IDs only
+Microsoft/Apple logos icons fonts,skip,could,yes,skip,use own tokens
+Agentless disk snapshot scanning,skip,could,yes,skip,out of scale
+Nexora SOC2/ISO certification,skip,could,no,skip,organisational not code
+Email verification + password reset + invite emails,auth,should,no,no,needs a mail provider account (user creates); biggest launch gap
+Account deletion + sign out everywhere,auth,should,no,yes,tested
+Suppress a rule for one asset or tag (noise control),findings,should,no,no,from entrepreneur: thin evidence (1 comment on Security Hub noise); also a standard CSPM need
+Terraform plan JSON pre-deploy scan (CI),integrations,could,no,no,from entrepreneur: thin evidence (1 comment on tool consolidation); reuses the same engine

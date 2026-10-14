@@ -1,0 +1,155 @@
+import { Router } from "express";
+import { z } from "zod";
+import { config, PLANS } from "../config";
+import { bad, conflict, forbidden, HttpError, notFound } from "../lib/errors";
+import { randomToken, sha256, verifyHmacHex } from "../lib/crypto";
+import { parse, requireRole, uuidParam } from "../lib/http";
+import { ROLE_RANK, type Role } from "../lib/context";
+import { audit } from "../lib/audit";
+import { usageOf } from "../services/scans";
+
+const r = Router();
+const role = z.enum(["admin", "analyst", "viewer"]);
+
+r.get("/team", requireRole("admin"), async (req, res) => {
+  const o = req.auth!.orgId;
+  const m = await req.db.query(`select m.id, m.role, m.created_at as "createdAt", u.email, u.name from members m join users u on u.id = m.user_id where m.org_id = $1 order by m.created_at`, [o]);
+  const i = await req.db.query(`select id, email, role, expires_at as "expiresAt" from invites where org_id = $1 and accepted_at is null and expires_at > now() order by created_at desc`, [o]);
+  res.json({ members: m.rows, invites: i.rows });
+});
+
+r.post("/team/invite", requireRole("admin"), async (req, res) => {
+  const b = parse(z.object({ email: z.string().trim().toLowerCase().email().max(254), role }), req.body);
+  const o = req.auth!.orgId;
+  const dup = await req.db.query("select 1 from members m join users u on u.id = m.user_id where m.org_id = $1 and u.email = $2", [o, b.email]);
+  if (dup.rows.length) throw conflict("This person is already a member", "already_member");
+  const token = randomToken(24);
+  await req.db.query("insert into invites (org_id, email, role, token_hash, expires_at) values ($1,$2,$3,$4, now() + interval '7 days')", [o, b.email, b.role, sha256(token)]);
+  await audit(req, "team.invite", b.email);
+  // No email provider yet: the link is shown once to the inviter, who sends it.
+  res.status(201).json({ link: `${config.appUrl}/invite/${token}`, email: b.email, role: b.role });
+});
+
+r.patch("/team/:id", requireRole("admin"), async (req, res) => {
+  const id = uuidParam(req.params["id"]);
+  const b = parse(z.object({ role: z.enum(["owner", "admin", "analyst", "viewer"]) }), req.body);
+  const target = (await req.db.query("select role from members where id = $1 and org_id = $2", [id, req.auth!.orgId])).rows[0];
+  if (!target) throw notFound("Member not found");
+  // only an owner can grant or change the owner role
+  if ((b.role === "owner" || target.role === "owner") && req.auth!.role !== "owner") throw forbidden("Only an owner can change owners");
+  if (target.role === "owner" && b.role !== "owner") {
+    const n = (await req.db.query("select count(*)::int as n from members where org_id = $1 and role = 'owner'", [req.auth!.orgId])).rows[0].n;
+    if (n <= 1) throw bad("An organization needs at least one owner", "last_owner");
+  }
+  await req.db.query("update members set role = $3, updated_at = now() where id = $1 and org_id = $2", [id, req.auth!.orgId, b.role]);
+  await audit(req, "team.role_changed", `${id}:${b.role}`);
+  res.json({ ok: true });
+});
+
+r.delete("/team/:id", requireRole("admin"), async (req, res) => {
+  const id = uuidParam(req.params["id"]);
+  const target = (await req.db.query("select role from members where id = $1 and org_id = $2", [id, req.auth!.orgId])).rows[0];
+  if (!target) throw notFound("Member not found");
+  if (target.role === "owner") {
+    if (req.auth!.role !== "owner") throw forbidden("Only an owner can remove an owner");
+    const n = (await req.db.query("select count(*)::int as n from members where org_id = $1 and role = 'owner'", [req.auth!.orgId])).rows[0].n;
+    if (n <= 1) throw bad("An organization needs at least one owner", "last_owner");
+  }
+  await req.db.query("delete from members where id = $1 and org_id = $2", [id, req.auth!.orgId]);
+  await audit(req, "team.removed", id);
+  res.json({ ok: true });
+});
+
+r.delete("/team/invites/:id", requireRole("admin"), async (req, res) => {
+  await req.db.query("delete from invites where id = $1 and org_id = $2", [uuidParam(req.params["id"]), req.auth!.orgId]);
+  res.json({ ok: true });
+});
+
+r.get("/audit", requireRole("admin"), async (req, res) => {
+  const page = Math.max(1, Number(req.query["page"]) || 1);
+  const { rows } = await req.db.query(
+    `select e.id, e.action, e.target, e.ip, e.created_at as "createdAt", u.email as actor from audit_events e left join users u on u.id = e.actor_id
+     where e.org_id = $1 order by e.created_at desc limit 50 offset $2`, [req.auth!.orgId, (page - 1) * 50]);
+  res.json({ items: rows, page });
+});
+
+r.get("/api-keys", requireRole("admin"), async (req, res) => {
+  const { rows } = await req.db.query(`select id, name, prefix, last_used_at as "lastUsedAt", created_at as "createdAt" from api_keys where org_id = $1 order by created_at desc`, [req.auth!.orgId]);
+  res.json({ items: rows });
+});
+r.post("/api-keys", requireRole("admin"), async (req, res) => {
+  const b = parse(z.object({ name: z.string().trim().min(1).max(60) }), req.body);
+  const n = (await req.db.query("select count(*)::int as n from api_keys where org_id = $1", [req.auth!.orgId])).rows[0].n;
+  if (n >= 10) throw bad("At most 10 API keys per organization", "too_many_keys");
+  const key = `cspm_${randomToken(32)}`;
+  const { rows } = await req.db.query("insert into api_keys (org_id, name, key_hash, prefix) values ($1,$2,$3,$4) returning id", [req.auth!.orgId, b.name, sha256(key), key.slice(0, 10)]);
+  await audit(req, "apikey.created", b.name);
+  res.status(201).json({ id: rows[0].id, key }); // shown once
+});
+r.delete("/api-keys/:id", requireRole("admin"), async (req, res) => {
+  await req.db.query("delete from api_keys where id = $1 and org_id = $2", [uuidParam(req.params["id"]), req.auth!.orgId]);
+  await audit(req, "apikey.revoked", String(req.params["id"]));
+  res.json({ ok: true });
+});
+
+r.get("/usage", requireRole("viewer"), async (req, res) => res.json({ ...(await usageOf(req.db, req.auth!.orgId)), plans: Object.entries(PLANS).map(([id, p]) => ({ id, ...p })) }));
+
+// ---- billing (Stripe, test mode until you swap keys) ----
+r.post("/billing/checkout", requireRole("owner"), async (req, res) => {
+  if (!config.stripeSecret || !config.stripeStarterPrice) throw new HttpError(503, "billing_not_configured", "Billing is not set up yet");
+  const body = new URLSearchParams({
+    mode: "subscription", "line_items[0][price]": config.stripeStarterPrice, "line_items[0][quantity]": "1",
+    client_reference_id: req.auth!.orgId, success_url: `${config.appUrl}/usage?upgraded=1`, cancel_url: `${config.appUrl}/usage`,
+  });
+  const s = await fetch("https://api.stripe.com/v1/checkout/sessions", { method: "POST", headers: { authorization: `Bearer ${config.stripeSecret}`, "content-type": "application/x-www-form-urlencoded" }, body, signal: AbortSignal.timeout(15000) });
+  const j: any = await s.json();
+  if (!s.ok || !j.url) throw new HttpError(502, "billing_error", "Could not start checkout");
+  await audit(req, "billing.checkout_started");
+  res.json({ url: j.url });
+});
+
+export function verifyStripeSignature(raw: Buffer, header: string, secret: string, now = Date.now()): boolean {
+  const parts = Object.fromEntries(header.split(",").map((p) => p.split("=") as [string, string]));
+  const t = Number(parts["t"]);
+  if (!t || Math.abs(now / 1000 - t) > 300 || !parts["v1"]) return false;
+  return verifyHmacHex(secret, `${t}.${raw.toString("utf8")}`, parts["v1"]);
+}
+
+r.post("/billing/portal", requireRole("owner"), async (req, res) => {
+  if (!config.stripeSecret) throw new HttpError(503, "billing_not_configured", "Billing is not set up yet");
+  const cust = (await req.db.query("select stripe_customer_id from organizations where id = $1", [req.auth!.orgId])).rows[0]?.stripe_customer_id;
+  if (!cust) throw bad("This organization has no subscription to manage", "no_subscription");
+  const s = await fetch("https://api.stripe.com/v1/billing_portal/sessions", { method: "POST", headers: { authorization: `Bearer ${config.stripeSecret}`, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ customer: cust, return_url: `${config.appUrl}/usage` }), signal: AbortSignal.timeout(15000) });
+  const j: any = await s.json();
+  if (!s.ok || !j.url) throw new HttpError(502, "billing_error", "Could not open the billing portal");
+  res.json({ url: j.url });
+});
+
+r.post("/billing/webhook", async (req, res) => {
+  if (!config.stripeWebhookSecret) throw new HttpError(503, "billing_not_configured", "Billing is not set up yet");
+  if (!req.rawBody || !verifyStripeSignature(req.rawBody, String(req.headers["stripe-signature"] ?? ""), config.stripeWebhookSecret)) throw bad("Invalid signature", "bad_signature");
+  const ev = req.body;
+  if (typeof ev?.id !== "string") throw bad("Bad event");
+  // Record + apply in ONE transaction: if applying fails the event is not marked seen, so Stripe's retry works.
+  const duplicate = await req.db.tx(async (q) => {
+    const first = await q.query("insert into stripe_events (id) values ($1) on conflict do nothing returning id", [ev.id]);
+    if (!first.rows[0]) return true;
+    const obj = ev.data?.object ?? {};
+    if (ev.type === "checkout.session.completed" && obj.client_reference_id)
+      await q.query("update organizations set plan = 'starter', stripe_customer_id = $2, updated_at = now() where id = $1", [obj.client_reference_id, obj.customer ?? null]);
+    // subscription ended or unpaid: back to free. past_due keeps access while Stripe retries the card.
+    if (obj.customer && (ev.type === "customer.subscription.deleted" || (ev.type === "customer.subscription.updated" && ["canceled", "unpaid", "incomplete_expired"].includes(obj.status))))
+      await q.query("update organizations set plan = 'free', updated_at = now() where stripe_customer_id = $1", [obj.customer]);
+    if (ev.type === "customer.subscription.updated" && obj.customer && ["active", "trialing"].includes(obj.status))
+      await q.query("update organizations set plan = 'starter', updated_at = now() where stripe_customer_id = $1 and plan = 'free'", [obj.customer]);
+    if (ev.type === "invoice.payment_failed" && obj.customer) {
+      const o = (await q.query("select id from organizations where stripe_customer_id = $1", [obj.customer])).rows[0];
+      if (o) await q.query("insert into audit_events (org_id, action, target) values ($1,'billing.payment_failed',$2)", [o.id, String(obj.id ?? "")]);
+    }
+    return false;
+  });
+  res.json({ ok: true, ...(duplicate ? { duplicate: true } : {}) });
+});
+
+export const _roles: Role[] = (Object.keys(ROLE_RANK) as Role[]);
+export default r;

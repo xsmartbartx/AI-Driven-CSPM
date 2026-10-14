@@ -1,25 +1,12 @@
-import app from "./app";
+import { openDb } from "@workspace/db";
+import { createApp } from "./app";
+import { config } from "./config";
 import { logger } from "./lib/logger";
 
-const rawPort = process.env["PORT"];
-
-if (!rawPort) {
-  throw new Error(
-    "PORT environment variable is required but was not provided.",
-  );
-}
-
-const port = Number(rawPort);
-
-if (Number.isNaN(port) || port <= 0) {
-  throw new Error(`Invalid PORT value: "${rawPort}"`);
-}
-
-app.listen(port, (err) => {
-  if (err) {
-    logger.error({ err }, "Error listening on port");
-    process.exit(1);
-  }
-
-  logger.info({ port }, "Server listening");
+const db = await openDb({ url: config.databaseUrl, dataDir: config.dataDir });
+const app = createApp(db);
+const server = app.listen(config.port, (err?: Error) => {
+  if (err) { logger.error({ err }, "Error listening on port"); process.exit(1); }
+  logger.info({ port: config.port, db: config.databaseUrl ? "postgres" : "pglite" }, "Server listening");
 });
+for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => server.close(() => void db.close().finally(() => process.exit(0))));

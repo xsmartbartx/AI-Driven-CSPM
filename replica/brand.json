@@ -1,0 +1,27 @@
+{
+  "avoid": [
+    "Wiz",
+    "Orca",
+    "Lacework",
+    "Prowler",
+    "Fluent"
+  ],
+  "domains": [
+    "microsoft.com",
+    "azure.com",
+    "apple.com",
+    "wiz.io"
+  ],
+  "colors": [
+    "#0078d4",
+    "#0071e3",
+    "#106ebe",
+    "#2b88d8"
+  ],
+  "reviewed_ok": [
+    "README.md: names Azure Defender as a supported data source (nominative use)",
+    "pnpm-workspace.yaml comment",
+    "tokens.css: -apple-system is a CSS font keyword, no Apple asset"
+  ],
+  "note": "Not a clone. 'Microsoft', 'Defender' and 'Apple' were removed from the avoid list after review: README names Azure's Defender as a supported data source (nominative use), tokens.css uses the -apple-system CSS font keyword, and one template comment mentions Microsoft. No third-party assets exist in code."
+}
