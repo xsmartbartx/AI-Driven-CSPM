@@ -58,7 +58,7 @@ export function AuthPage({ onAuth }: { onAuth: (m: Me) => void }) {
   );
 }
 
-export function InvitePage({ token, onDone }: { token: string; onDone: (m: Me) => void }) {
+export function InvitePage({ token, onDone, signedInSso }: { token: string; onDone: (m: Me) => void; signedInSso: string | null }) {
   const [, nav] = useLocation();
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
@@ -67,7 +67,7 @@ export function InvitePage({ token, onDone }: { token: string; onDone: (m: Me) =
   async function submit(e: FormEvent) {
     e.preventDefault();
     setErr(""); setBusy(true);
-    try { onDone(await api<Me>("POST", "/invites/accept", { token, password, name: name || undefined })); nav("/"); }
+    try { onDone(await api<Me>("POST", "/invites/accept", { token, password: signedInSso ? undefined : password, name: name || undefined })); nav("/"); }
     catch (x) { setErr((x as ApiError).message); } finally { setBusy(false); }
   }
   return (
@@ -75,9 +75,13 @@ export function InvitePage({ token, onDone }: { token: string; onDone: (m: Me) =
       <form className="card" onSubmit={submit}>
         <Brand />
         <h1>Join your team</h1>
-        <p className="muted">Choose a password for your account. If you already have one, enter it.</p>
-        <label className="field">Your name <input className="input" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} maxLength={100} /></label>
-        <label className="field">Password <input className="input" type="password" autoComplete="new-password" required minLength={10} value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+        {signedInSso ? <p className="muted">You are signed in as {signedInSso} through NEXORA. Accept to join this organization.</p> : (
+          <>
+            <p className="muted">Choose a password for your account. If you already have one, enter it.</p>
+            <label className="field">Your name <input className="input" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} maxLength={100} /></label>
+            <label className="field">Password <input className="input" type="password" autoComplete="new-password" required minLength={10} value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+          </>
+        )}
         {err && <div className="err" role="alert">{err}</div>}
         <button className="btn primary lg" disabled={busy}>{busy ? "Please wait…" : "Accept invitation"}</button>
       </form>

@@ -86,7 +86,7 @@ r.get("/auth/sso", rateLimit("sso", 30, 60_000), async (req, res) => {
 });
 
 r.post("/invites/accept", rateLimit("invite", 20, 3600_000), async (req, res) => {
-  const b = parse(z.object({ token: z.string().min(10).max(200), password, name: z.string().trim().max(100).optional() }), req.body);
+  const b = parse(z.object({ token: z.string().min(10).max(200), password: password.optional(), name: z.string().trim().max(100).optional() }), req.body);
   const { rows } = await req.db.query("select id, org_id, email, role, expires_at, accepted_at from invites where token_hash = $1", [sha256(b.token)]);
   const inv = rows[0];
   if (!inv || inv.accepted_at || new Date(inv.expires_at) < new Date()) throw bad("This invitation is invalid or has expired", "invite_invalid");
@@ -94,10 +94,14 @@ r.post("/invites/accept", rateLimit("invite", 20, 3600_000), async (req, res) =>
   let userId: string;
   let version = 0; // an existing user may have signed out everywhere: the new cookie must carry their current version
   if (ex) {
-    if (!(await verifyPassword(b.password, ex.password_hash))) throw unauthorized("Email or password is incorrect");
+    // A Nexora SSO user has no password: they accept through their own signed-in session. Everyone else proves the password.
+    const cur = ex.password_hash ? null : await loadAuth(req);
+    const viaSession = !ex.password_hash && cur?.userId === ex.id;
+    if (!viaSession && (!b.password || !(await verifyPassword(b.password, ex.password_hash)))) throw unauthorized("Email or password is incorrect");
     userId = ex.id;
     version = ex.token_version;
   } else {
+    if (!b.password) throw bad("Choose a password of at least 10 characters", "password_required");
     userId = (await req.db.query("insert into users (email, name, password_hash) values ($1,$2,$3) returning id", [inv.email, b.name ?? null, await hashPassword(b.password)])).rows[0].id;
   }
   await req.db.tx(async (q) => {
