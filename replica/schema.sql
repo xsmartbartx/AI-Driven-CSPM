@@ -1,5 +1,7 @@
+-- GENERATED from lib/db/migrations by gen-schema.mjs. The current schema, for reading. Change schema by adding a migration.
+
+-- ===== 0001_init =====
 -- NEXORA CSPM schema. Postgres 15+. Times are timestamptz (UTC). Every tenant table has org_id.
-create extension if not exists pgcrypto;
 
 create table organizations (
   id uuid primary key default gen_random_uuid(),
@@ -18,7 +20,6 @@ create table users (
   nexora_user_id text unique,
   password_hash text,                       -- null when SSO only
   token_version int not null default 0,     -- bump to sign out everywhere
-  email_verified_at timestamptz,            -- set by the verify link, or by Nexora SSO (Nexora already verified it)
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -173,17 +174,6 @@ create table invites (
   created_at timestamptz not null default now()
 );
 
-create table email_tokens (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references users(id) on delete cascade,
-  kind text not null check (kind in ('reset','verify')),
-  token_hash text not null unique,          -- sha256; the token itself exists only in the email
-  expires_at timestamptz not null,
-  used_at timestamptz,
-  created_at timestamptz not null default now()
-);
-create index on email_tokens (user_id, kind);
-
 create table sso_tokens (
   jti text primary key,                     -- one-time use of Nexora handoff tokens
   expires_at timestamptz not null
@@ -203,3 +193,18 @@ create table stripe_events (
 -- Defense in depth: RLS keyed on a per-transaction setting. The API ALSO scopes every query by org_id.
 -- Pattern for each tenant table:  alter table X enable row level security;
 --   create policy tenant on X using (org_id = current_setting('app.org_id', true)::uuid);
+
+-- ===== 0002_email =====
+-- Email confirmation and password reset. Idempotent: databases created before migrations existed may already have parts of it.
+alter table users add column if not exists email_verified_at timestamptz;
+
+create table if not exists email_tokens (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  kind text not null check (kind in ('reset','verify')),
+  token_hash text not null unique,          -- sha256; the token itself exists only in the email
+  expires_at timestamptz not null,
+  used_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists email_tokens_user_id_kind_idx on email_tokens (user_id, kind);

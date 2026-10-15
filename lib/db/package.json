@@ -4,11 +4,13 @@
   "private": true,
   "type": "module",
   "exports": { ".": "./src/index.ts" },
+  "scripts": { "test": "tsx --test test/*.test.ts", "typecheck": "tsc -p tsconfig.json --noEmit" },
   "dependencies": {
     "@electric-sql/pglite": "^0.3.0",
     "pg": "^8.13.0"
   },
   "devDependencies": {
+    "tsx": "catalog:",
     "@types/node": "catalog:",
     "@types/pg": "^8.11.0"
   }
