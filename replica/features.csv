@@ -37,7 +37,7 @@ Licensed compliance benchmark text,skip,could,yes,skip,map IDs only
 Microsoft/Apple logos icons fonts,skip,could,yes,skip,use own tokens
 Agentless disk snapshot scanning,skip,could,yes,skip,out of scale
 Nexora SOC2/ISO certification,skip,could,no,skip,organisational not code
-Email verification + password reset + invite emails,auth,should,no,no,needs a mail provider account (user creates); biggest launch gap
+Email verification + password reset + invite emails,auth,should,no,partial,"built on Resend, mocked-provider tests pass; needs your Resend account, verified domain and key before it sends"
 Account deletion + sign out everywhere,auth,should,no,yes,tested
 Suppress a rule for one asset or tag (noise control),findings,should,no,no,from entrepreneur: thin evidence (1 comment on Security Hub noise); also a standard CSPM need
 Terraform plan JSON pre-deploy scan (CI),integrations,could,no,no,from entrepreneur: thin evidence (1 comment on tool consolidation); reuses the same engine

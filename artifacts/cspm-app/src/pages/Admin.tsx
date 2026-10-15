@@ -52,10 +52,11 @@ export function Team() {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("viewer");
   const [link, setLink] = useState("");
+  const [emailed, setEmailed] = useState("");
   const [err, setErr] = useState("");
   async function invite(e: FormEvent) {
     e.preventDefault(); setErr(""); setLink("");
-    try { setLink((await api<any>("POST", "/team/invite", { email, role })).link); setEmail(""); reload(); } catch (x) { setErr((x as ApiError).message); }
+    try { const r = await api<any>("POST", "/team/invite", { email, role }); setLink(r.link); setEmailed(r.emailed ? r.email : ""); setEmail(""); reload(); } catch (x) { setErr((x as ApiError).message); }
   }
   const act = async (fn: () => Promise<unknown>, ok: string) => { try { await fn(); toast(ok); reload(); } catch (x) { toast((x as ApiError).message); } };
   return (
@@ -71,7 +72,7 @@ export function Team() {
         {err && <div className="err" role="alert" style={{ marginTop: 8 }}>{err}</div>}
         {link && (
           <div className="banner" style={{ marginTop: 12 }} role="status">
-            Send this link to your teammate. It works once and expires in 7 days.
+            {emailed ? <>We emailed the invitation to {emailed}. </> : <>We could not email this invitation, so send the link yourself. </>}The link works once and expires in 7 days.
             <div className="row" style={{ marginTop: 8, flexWrap: "nowrap" }}><input className="input" readOnly value={link} aria-label="Invite link" onFocus={(e) => e.target.select()} />
               <button className="btn" onClick={() => navigator.clipboard?.writeText(link).then(() => toast("Copied"), () => toast("Select the link and copy it"))}>Copy</button></div>
           </div>

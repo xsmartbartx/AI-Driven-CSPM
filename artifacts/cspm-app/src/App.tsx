@@ -8,10 +8,10 @@ import { NewScan, ScanDetail, Scans } from "./pages/Scans";
 import { Assets, Compliance } from "./pages/Inventory";
 import { Audit, Settings, Team, Usage } from "./pages/Admin";
 import { Planned } from "./pages/Planned";
-import { AuthPage, InvitePage } from "./pages/Auth";
+import { AuthPage, ForgotPasswordPage, InvitePage, ResetPasswordPage, VerifyEmailPage } from "./pages/Auth";
 
 export type Role = "owner" | "admin" | "analyst" | "viewer";
-export interface Me { user: { id: string; email: string; name: string | null; hasPassword: boolean }; org: { id: string; name: string; plan: string }; role: Role }
+export interface Me { user: { id: string; email: string; name: string | null; hasPassword: boolean; emailVerified: boolean }; org: { id: string; name: string; plan: string }; role: Role }
 interface Ctx { me: Me; setMe: (m: Me | null) => void; can: (min: Role) => boolean; toast: (m: string) => void }
 const RANK: Record<Role, number> = { viewer: 1, analyst: 2, admin: 3, owner: 4 };
 const C = createContext<Ctx>(null as never);
@@ -73,8 +73,26 @@ function Shell({ children }: { children: ReactNode }) {
           <span className="muted" style={{ fontSize: 13 }}>{me.user.email} · {me.role}</span>
           <button className="btn sm" onClick={async () => { await api("POST", "/auth/logout").catch(() => {}); setMe(null); }}>Sign out</button>
         </header>
-        <main className="content" id="main">{children}</main>
+        <main className="content" id="main">{!me.user.emailVerified && <VerifyBanner email={me.user.email} />}{children}</main>
       </div>
+    </div>
+  );
+}
+
+function VerifyBanner({ email }: { email: string }) {
+  const { toast } = useMe();
+  const [busy, setBusy] = useState(false);
+  async function resend() {
+    setBusy(true);
+    try {
+      const r = await api<{ sent?: boolean; alreadyVerified?: boolean }>("POST", "/auth/resend-verification");
+      toast(r.alreadyVerified ? "Already confirmed. Reload the page." : r.sent ? "Confirmation email sent" : "We could not send the email right now");
+    } catch (e) { toast((e as ApiError).message); } finally { setBusy(false); }
+  }
+  return (
+    <div className="banner row" style={{ justifyContent: "space-between" }}>
+      <span>Confirm your email address. We sent a link to <strong>{email}</strong>.</span>
+      <button className="btn sm" onClick={resend} disabled={busy}>Resend email</button>
     </div>
   );
 }
@@ -98,6 +116,9 @@ export function App() {
   return (
     <Router>
       <Switch>
+        <Route path="/forgot-password" component={ForgotPasswordPage} />
+        <Route path="/reset-password/:token">{(p) => <ResetPasswordPage token={p.token} />}</Route>
+        <Route path="/verify-email/:token">{(p) => <VerifyEmailPage token={p.token} />}</Route>
         <Route path="/invite/:token">{(p) => <InvitePage token={p.token} onDone={setMe} signedInSso={!!me && !me.user.hasPassword ? me.user.email : null} />}</Route>
         {!me ? (
           <Route><AuthPage onAuth={setMe} /></Route>

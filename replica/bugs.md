@@ -15,7 +15,7 @@ Found during build and test, all fixed, each with a test that now guards it.
 | B09 | S2 | startup | `pnpm-workspace.yaml` removed macOS native binaries, so Vite could not start on a Mac; `lib/api-zod/tsconfig.json` was empty and `lib/db/package.json` was a copy of the root one | removed darwin overrides; rewrote both files |
 
 ## Open, to fix before launch
-- **O1 (S2)** No email: invites are copy-paste links, there is no password reset and no email verification. Needs a mail provider account from you.
+- **O1 (S2)** Email is built (Resend: confirmation, reset, invites) but untested against the real provider and needs your Resend account, verified domain and key. Until then production sends nothing; invites remain copy-paste links.
 - **O2 (S3)** Rate limiter is in memory per process.
 - **O3 (S3)** Postgres RLS not enabled (query-level isolation is tested).
 

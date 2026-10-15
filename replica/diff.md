@@ -21,7 +21,7 @@
 | rules | 4 areas: buckets, SGs, IAM, DBs | same 4 areas, 9 rules, 80/443 not flagged | verify rule parity with the Beta's source (not in this repo) |
 
 ## Top five to build next
-1. Email provider: verification, reset, invite mail (you create the account).
+1. Resend account + verified domain + key (the code is built and tested with a mocked provider; see `replica/email-setup.md`).
 2. Stripe test-mode end-to-end run and the real Starter price.
 3. Nexora token issuer on onenexora.com + redirect from console (the SSO handoff).
 4. AWS read-only connector (cross-account role + external ID).
