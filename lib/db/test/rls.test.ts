@@ -138,3 +138,43 @@ test("real Postgres: pooled connections never leak a role or org between request
   assert.ok((await v.query("select org_id from findings")).rows.every((r) => r.org_id === ids["orgA"]));
   await v.release();
 });
+
+test("a final release waits for in-flight work, then refuses further use (client disconnect mid-request)", async () => {
+  // a query that is still running when the response 'close' fires is not cut off, and the abandoned handler cannot re-acquire a connection
+  const v = db.scoped(ids["orgA"]!);
+  const running = v.query("select pg_sleep(0.3), org_id from findings");
+  const released = v.release(true);
+  assert.ok((await running).rows.every((r) => r.org_id === ids["orgA"]));
+  await released;
+  await assert.rejects(() => v.query("select 1"), /already finished/);
+  await assert.rejects(() => v.tx(async () => 1), /already finished/);
+  await v.release(true); // releasing twice is harmless
+});
+
+test("a transaction in flight at final release is completed first; no connection returns to the pool mid-transaction", async () => {
+  const v = db.scoped(ids["orgA"]!);
+  const title = `tx-${Date.now()}`;
+  const work = v.tx(async (q) => {
+    await q.query("select pg_sleep(0.2)");
+    await q.query("update findings set title = $1 where id = $2", [title, ids["findingA"]]);
+  });
+  const released = v.release(true); // the "client went away" moment
+  await work; await released;
+  assert.equal((await db.query("select title from findings where id = $1", [ids["findingA"]])).rows[0]!.title, title); // committed, not cut off
+  if (process.env["TEST_DATABASE_URL"]) {
+    for (let i = 0; i < 20; i++) {
+      const r = (await db.query("select current_user::text as u, (select count(*)::int from pg_stat_activity where datname = current_database() and state like 'idle in transaction%') as open_tx")).rows[0]!;
+      assert.notEqual(r.u, "cspm_app");
+      assert.equal(r.open_tx, 0);
+    }
+  }
+});
+
+test("real Postgres: operations on one view run in order, and a plain release lets the view be used again", { skip: !process.env["TEST_DATABASE_URL"] }, async () => {
+  const v = db.scoped(ids["orgA"]!);
+  const order: number[] = [];
+  await Promise.all([v.query("select pg_sleep(0.15)").then(() => order.push(1)), v.query("select 1").then(() => order.push(2)), v.release().then(() => order.push(3))]);
+  assert.deepEqual(order, [1, 2, 3]);
+  assert.ok((await v.query("select org_id from findings")).rows.every((r) => r.org_id === ids["orgA"])); // re-acquires
+  await v.release(true);
+});

@@ -641,7 +641,7 @@ test("requireRole hands handlers a tenant-scoped db: an unfiltered query cannot 
   await a.c.post("/scans", { config: SAMPLE_CONFIG });
   await b.c.post("/scans", { config: [{ type: "s3_bucket", name: "only-b", public_read: true }] });
   const probe = express();
-  probe.use((req, res, next) => { req.db = db; req.sysDb = db; res.on("close", () => { void req.db.release(); }); next(); }); // same hook as createApp
+  probe.use((req, res, next) => { req.db = db; req.sysDb = db; res.on("close", () => { void req.db.release(true).catch(() => {}); }); next(); }); // same hook as createApp
   // a handler that "forgets" its WHERE org_id clause
   probe.get("/count", requireRole("viewer"), async (req, res) => res.json({ n: (await req.db.query("select count(*)::int as n from findings")).rows[0]!.n, orgs: (await req.db.query("select count(*)::int as n from organizations")).rows[0]!.n }));
   const srv = probe.listen(0);

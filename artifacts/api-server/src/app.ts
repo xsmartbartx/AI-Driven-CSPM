@@ -39,7 +39,9 @@ export function createApp(db: Db, opts: { mailer?: Mailer } = {}): Express {
   app.use(express.json({ limit: "1mb", verify: (req, _res, buf) => { (req as Request).rawBody = buf; } }));
   app.use((req, res, next) => {
     req.db = db; req.sysDb = db; req.mailer = mailer;
-    res.on("close", () => { void req.db.release(); }); // hand a tenant-scoped connection back to the pool
+    // "close" also fires when the client disconnects mid-request: the final release waits for any query or transaction
+    // still running, then returns the connection, and refuses further use by the abandoned handler
+    res.on("close", () => { void req.db.release(true).catch(() => {}); });
     next();
   });
 
