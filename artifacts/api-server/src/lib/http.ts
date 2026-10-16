@@ -55,6 +55,7 @@ export function requireRole(min: Role) {
     if (!a) throw unauthorized();
     if (ROLE_RANK[a.role] < ROLE_RANK[min]) throw forbidden();
     req.auth = a;
+    req.db = req.sysDb.scoped(a.orgId); // from here on every query runs under row level security for this organization
     next();
   };
 }

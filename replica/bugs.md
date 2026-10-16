@@ -17,7 +17,7 @@ Found during build and test, all fixed, each with a test that now guards it.
 ## Open, to fix before launch
 - **O1 (S2)** Email is built (Resend: confirmation, reset, invites) but untested against the real provider and needs your Resend account, verified domain and key. Until then production sends nothing; invites remain copy-paste links.
 - **O2 (S3)** Rate limiter is in memory per process.
-- **O3 (S3)** Postgres RLS not enabled (query-level isolation is tested).
+- ~~O3~~ Postgres RLS: done in migration 0003. Found while testing it: a connection-leak in my own tests, a test database that was not re-runnable, and a migration that failed hard when the role already existed under another owner (now tolerant, with a clear startup error instead).
 
 ## To check (not reproduced)
 - Behaviour with a very large number of findings (thousands): list is paginated, overview queries are aggregate, untested at scale.

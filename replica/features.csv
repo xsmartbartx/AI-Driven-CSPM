@@ -8,7 +8,7 @@ Overview dashboard (score KPIs trend top actions),dashboard,must,no,yes,S06 Defe
 Risk score 0-100 per finding,risk,must,no,yes,v1 simplified formula
 Scan history and new/fixed diff,scan,should,no,yes,S10
 SSO redirect from Nexora console,auth,must,no,partial,token endpoint built+tested; Nexora must sign tokens and link here (needs SSO_SECRET)
-Multi-tenant orgs with RLS isolation,auth,must,no,partial,app-level org scoping tested with 2 orgs; Postgres RLS policies NOT yet enabled (schema comment only)
+Multi-tenant orgs with RLS isolation,auth,must,no,yes,query-level scoping + Postgres RLS (migration 0003); tested incl. non-superuser owner
 RBAC owner admin analyst viewer,auth,must,no,yes,S18
 Audit log,security,should,no,yes,S20
 Locked CORS + rate limit + security headers,security,must,no,yes,fix app.use(cors())

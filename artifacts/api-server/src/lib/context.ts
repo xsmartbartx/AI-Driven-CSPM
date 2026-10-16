@@ -6,6 +6,7 @@ export const ROLE_RANK: Record<Role, number> = { viewer: 1, analyst: 2, admin: 3
 export interface Auth { userId: string | null; orgId: string; role: Role; email: string | null; via: "session" | "key" }
 declare global {
   namespace Express {
-    interface Request { auth?: Auth; db: Db; mailer: Mailer; rawBody?: Buffer }
+    /** db is the privileged connection until requireRole() authenticates the request, then the caller's tenant-scoped view (RLS). */
+    interface Request { auth?: Auth; db: Db; sysDb: Db; mailer: Mailer; rawBody?: Buffer }
   }
 }

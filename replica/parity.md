@@ -28,7 +28,7 @@ Not shippable yet: 1 must-have features are not done.
 - Risk score 0-100 per finding
 - Scan history and new/fixed diff
 - SSO redirect from Nexora console
-- Multi-tenant orgs with RLS isolation (RLS is planned, not enabled; isolation is query-level only)
+- Multi-tenant orgs with RLS isolation (RLS enabled by migration 0003)
 - RBAC owner admin analyst viewer
 - Audit log
 - Locked CORS + rate limit + security headers

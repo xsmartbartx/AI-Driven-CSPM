@@ -31,6 +31,10 @@ export const config = {
   stripeWebhookSecret: process.env["STRIPE_WEBHOOK_SECRET"] ?? "",
   stripeStarterPrice: process.env["STRIPE_PRICE_STARTER"] ?? "",
   /** Resend (https://resend.com). Without a key: dev logs emails to the console, production sends nothing. */
+  /** Database-level tenant isolation (row level security). On unless RLS_ENFORCE=0. */
+  rls: process.env["RLS_ENFORCE"] !== "0",
+  /** Each in-flight authenticated request holds one connection (released when the response closes). */
+  poolMax: Math.max(2, Number(process.env["DB_POOL_MAX"] ?? 10) || 10),
   resendKey: process.env["RESEND_API_KEY"] ?? "",
   mailFrom: process.env["MAIL_FROM"] ?? "NEXORA CSPM <no-reply@cspm.onenexora.com>",
   anthropicKey: process.env["ANTHROPIC_API_KEY"] ?? "",

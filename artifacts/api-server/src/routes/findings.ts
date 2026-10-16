@@ -81,6 +81,7 @@ r.post("/findings/:id/explain", requireRole("analyst"), async (req, res) => {
     if (u.ai.used >= u.ai.limit) throw new HttpError(402, "quota_exceeded", `You have used all ${PLANS[u.plan].ai} AI explanations on the ${u.planLabel} plan this month.`);
     return (await q.query("insert into usage_events (org_id, kind, period) values ($1,'ai',$2) returning id", [orgId, period()])).rows[0]!.id;
   });
+  await req.db.release(); // do not hold a pooled connection during the slow external call
   let out;
   try {
     out = await explainFinding(rows[0] as any);

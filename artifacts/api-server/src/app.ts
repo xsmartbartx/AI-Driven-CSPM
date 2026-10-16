@@ -37,7 +37,11 @@ export function createApp(db: Db, opts: { mailer?: Mailer } = {}): Express {
   // exact origins only, with credentials. Unlisted origins get no CORS headers.
   app.use(cors({ origin: (o, cb) => cb(null, !o || config.origins.includes(o)), credentials: true, allowedHeaders: ["content-type", "x-csrf", "authorization"], methods: ["GET", "POST", "PATCH", "DELETE"] }));
   app.use(express.json({ limit: "1mb", verify: (req, _res, buf) => { (req as Request).rawBody = buf; } }));
-  app.use((req, _res, next) => { req.db = db; req.mailer = mailer; next(); });
+  app.use((req, res, next) => {
+    req.db = db; req.sysDb = db; req.mailer = mailer;
+    res.on("close", () => { void req.db.release(); }); // hand a tenant-scoped connection back to the pool
+    next();
+  });
 
   app.use("/api", healthRouter, authRouter, scansRouter, findingsRouter, teamRouter);
   app.use("/api", (_req, _res, next) => next(new HttpError(404, "not_found", "Unknown endpoint")));

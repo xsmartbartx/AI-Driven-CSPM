@@ -15,7 +15,7 @@ Status 2026-10-14: **ready to deploy to staging, not ready for public launch.** 
 | API production mode (NODE_ENV=production) | refuses to start without JWT_SECRET; HSTS on; cookie HttpOnly+Secure+SameSite=Lax |
 | Docker image (`deploy/api.Dockerfile`, 244 MB) run against Postgres | healthz 200, demo scan 200, healthcheck wired |
 | brand sweep | clean, after narrowing the avoid list to competitor names (see `replica/brand.json` note) |
-| must-haves | 10 of 13 done, 3 partial: Stripe, SSO, RLS (see below) |
+| must-haves | 11 of 13 done, 2 partial: Stripe, SSO |
 | open S1 bugs | none. Open S2: no email (verification, reset, invites) |
 | privacy + terms pages | **drafts live on the site, not lawyer-reviewed, brackets to fill** |
 | account deletion | works (tested) |
@@ -25,9 +25,16 @@ Status 2026-10-14: **ready to deploy to staging, not ready for public launch.** 
 1. **Email**: code is done (Resend; confirmation, reset, invites). You still need to create the Resend account, verify the sending domain and set `RESEND_API_KEY` + `MAIL_FROM`; steps in `replica/email-setup.md`. Without it, production sends nothing and invites are copy-paste links.
 2. **Stripe end to end** in test mode, then live (steps below).
 3. **Nexora SSO handoff**: onenexora.com must mint the token and redirect (below).
-4. **Postgres RLS** switched on (defense in depth). Tenant isolation is already enforced in every query and tested, so this is hardening, not a hole.
+4. ~~Postgres RLS~~ **done** (migration 0003). Two things to confirm on your database: the `cspm_app` role can be created, and the API's database user owns the tables. See "Database roles and row level security" below.
 5. **Lawyer review** of Privacy and Terms; fill the bracketed details; add a cookie notice only if you add non-essential cookies or analytics (today there are none, only the session cookie).
 6. Rate limiter is per process: fine for one instance, move to Redis before running several.
+
+## Database roles and row level security
+Migration `0003_rls` makes Postgres itself refuse cross-tenant access, on top of the `org_id` filters in every query.
+- Authenticated requests run as the restricted role **`cspm_app`** (`NOLOGIN`, no superuser, no `BYPASSRLS`) with `app.org_id` set to the caller's organization. It can only read and write its own rows on the 11 tenant tables, read its own `organizations` row (the only writable column is `updated_at`, so a tenant request cannot change a plan or a Stripe id), and read the non-secret columns of `users` for people in its organization. It has **no access** to `email_tokens`, `sso_tokens`, `stripe_events`, `billing_state` or `schema_migrations`.
+- Sign-up, login, SSO, invite acceptance and Stripe webhooks use the connection's own role, the **table owner**, which is not subject to the policies on purpose.
+- **Your `DATABASE_URL` user must own the tables** (it runs the migrations, so it does) and must be allowed to `SET ROLE cspm_app`. Migration 0003 creates the role and grants it to that user. If your provider forbids creating roles, ask an administrator to run `create role cspm_app nologin; grant cspm_app to <app user>;` before the first start. If the role is unusable the API **refuses to start** and says why. `RLS_ENFORCE=0` runs without it and logs a warning; use it only knowingly.
+- **Connections:** each in-flight authenticated request holds one pooled connection until its response closes (released early around slow external calls). Size `DB_POOL_MAX` for your concurrency and check Postgres `max_connections`. **A transaction-mode pooler (pgbouncer in transaction mode, the Supabase pooler on port 6543) is not compatible**, because role and org are session settings; use a direct or session-mode connection.
 
 ## Target layout
 | what | host name | served by |

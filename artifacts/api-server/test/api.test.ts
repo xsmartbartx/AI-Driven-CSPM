@@ -58,6 +58,7 @@ class Client {
   patch = (p: string, b?: unknown) => this.call("PATCH", p, b ?? {});
   del = (p: string) => this.call("DELETE", p);
 }
+const RUN = `${Date.now()}${Math.random().toString(36).slice(2, 6)}`; // unique ids so the suite can be re-run against a database that is not fresh
 let n = 0;
 async function signup(name = "Org") {
   resetRateLimits();
@@ -390,7 +391,7 @@ test("account deletion: needs password, deletes data, protects sole owner of a s
 
 test("Stripe webhook: signature, idempotency, plan change", async () => {
   const { me } = await signup();
-  const body = JSON.stringify({ id: `evt_${Date.now()}`, type: "checkout.session.completed", data: { object: { client_reference_id: me.org.id, customer: "cus_123" } } });
+  const body = JSON.stringify({ id: `evt_${Date.now()}`, type: "checkout.session.completed", data: { object: { client_reference_id: me.org.id, customer: `cus_123_${RUN}` } } });
   const sign = (b: string, t = Math.floor(Date.now() / 1000), secret = "whsec_test") => `t=${t},v1=${createHmac("sha256", secret).update(`${t}.${b}`).digest("hex")}`;
   const post = (b: string, sig: string) => fetch(base + "/billing/webhook", { method: "POST", headers: { "content-type": "application/json", "stripe-signature": sig }, body: b });
   assert.equal((await post(body, sign(body, undefined, "wrong"))).status, 400);
@@ -411,16 +412,16 @@ test("Stripe: subscription lifecycle events; a failed handler is not marked seen
   const send = (ev: object) => { const b = JSON.stringify(ev); return fetch(base + "/billing/webhook", { method: "POST", headers: { "content-type": "application/json", "stripe-signature": sign(b) }, body: b }); };
   const plan = async () => (await db.query("select plan from organizations where id = $1", [me.org.id])).rows[0]!.plan;
   const id = () => `evt_${Math.random()}`;
-  await send({ id: id(), type: "checkout.session.completed", data: { object: { client_reference_id: me.org.id, customer: "cus_life" } } });
+  await send({ id: id(), type: "checkout.session.completed", data: { object: { client_reference_id: me.org.id, customer: `cus_life_${RUN}` } } });
   assert.equal(await plan(), "starter");
-  await send({ id: id(), type: "customer.subscription.updated", data: { object: { customer: "cus_life", status: "past_due" } } });
+  await send({ id: id(), type: "customer.subscription.updated", data: { object: { customer: `cus_life_${RUN}`, status: "past_due" } } });
   assert.equal(await plan(), "starter");
-  await send({ id: id(), type: "invoice.payment_failed", data: { object: { customer: "cus_life", id: "in_1" } } });
+  await send({ id: id(), type: "invoice.payment_failed", data: { object: { customer: `cus_life_${RUN}`, id: "in_1" } } });
   assert.ok((await db.query("select 1 from audit_events where org_id = $1 and action = 'billing.payment_failed'", [me.org.id])).rows.length);
-  await send({ id: id(), type: "customer.subscription.updated", data: { object: { customer: "cus_life", status: "canceled" } } });
+  await send({ id: id(), type: "customer.subscription.updated", data: { object: { customer: `cus_life_${RUN}`, status: "canceled" } } });
   assert.equal(await plan(), "free");
   const evId = id();
-  const bad = await send({ id: evId, type: "checkout.session.completed", data: { object: { client_reference_id: "not-a-uuid", customer: "cus_x" } } });
+  const bad = await send({ id: evId, type: "checkout.session.completed", data: { object: { client_reference_id: "not-a-uuid", customer: `cus_x_${RUN}` } } });
   assert.equal(bad.status, 500);
   assert.equal((await db.query("select 1 from stripe_events where id = $1", [evId])).rows.length, 0);
 });
@@ -510,16 +511,16 @@ test("Stripe: out-of-order events and multiple v1 signatures", async () => {
   const org = async () => (await db.query("select plan, stripe_customer_id from organizations where id = $1", [me.org.id])).rows[0]!;
   const T = Math.floor(Date.now() / 1000);
   // the cancellation (newer) arrives BEFORE the checkout (older)
-  assert.equal((await send({ id: `evt_${Math.random()}`, created: T + 10, type: "customer.subscription.deleted", data: { object: { customer: "cus_ooo" } } })).status, 200);
-  assert.equal((await send({ id: `evt_${Math.random()}`, created: T, type: "checkout.session.completed", data: { object: { client_reference_id: me.org.id, customer: "cus_ooo" } } })).status, 200);
+  assert.equal((await send({ id: `evt_${Math.random()}`, created: T + 10, type: "customer.subscription.deleted", data: { object: { customer: `cus_ooo_${RUN}` } } })).status, 200);
+  assert.equal((await send({ id: `evt_${Math.random()}`, created: T, type: "checkout.session.completed", data: { object: { client_reference_id: me.org.id, customer: `cus_ooo_${RUN}` } } })).status, 200);
   const o = await org();
-  assert.equal(o.stripe_customer_id, "cus_ooo");
+  assert.equal(o.stripe_customer_id, `cus_ooo_${RUN}`);
   assert.equal(o.plan, "free"); // the late checkout did not resurrect the cancelled subscription
   // a newer event still wins
-  await send({ id: `evt_${Math.random()}`, created: T + 20, type: "customer.subscription.updated", data: { object: { customer: "cus_ooo", status: "active" } } });
+  await send({ id: `evt_${Math.random()}`, created: T + 20, type: "customer.subscription.updated", data: { object: { customer: `cus_ooo_${RUN}`, status: "active" } } });
   assert.equal((await org()).plan, "starter");
   // rotation: several v1 entries, only one valid, in either position
-  const ev = () => ({ id: `evt_${Math.random()}`, created: T + 30, type: "customer.subscription.deleted", data: { object: { customer: "cus_ooo" } } });
+  const ev = () => ({ id: `evt_${Math.random()}`, created: T + 30, type: "customer.subscription.deleted", data: { object: { customer: `cus_ooo_${RUN}` } } });
   assert.equal((await send(ev(), (b, t) => `t=${t},v1=${"0".repeat(64)},v1=${sigFor(b, t)}`)).status, 200);
   assert.equal((await org()).plan, "free");
   assert.equal((await send(ev(), (b, t) => `t=${t},v1=${sigFor(b, t)},v1=${"0".repeat(64)}`)).status, 200);
@@ -631,6 +632,26 @@ test("Resend adapter: request shape, and failures never throw", async () => {
   assert.equal(await rejected.send({ to: "a@example.com", subject: "S", text: "T", html: "H" }), false);
   const down = resendMailer("k", "f", (async () => { throw new Error("ECONNREFUSED"); }) as any);
   assert.equal(await down.send({ to: "a@example.com", subject: "S", text: "T", html: "H" }), false);
+});
+
+test("requireRole hands handlers a tenant-scoped db: an unfiltered query cannot see other organizations", async () => {
+  const express = (await import("express")).default;
+  const { requireRole } = await import("../src/lib/http.ts");
+  const a = await signup("Canary A"), b = await signup("Canary B");
+  await a.c.post("/scans", { config: SAMPLE_CONFIG });
+  await b.c.post("/scans", { config: [{ type: "s3_bucket", name: "only-b", public_read: true }] });
+  const probe = express();
+  probe.use((req, res, next) => { req.db = db; req.sysDb = db; res.on("close", () => { void req.db.release(); }); next(); }); // same hook as createApp
+  // a handler that "forgets" its WHERE org_id clause
+  probe.get("/count", requireRole("viewer"), async (req, res) => res.json({ n: (await req.db.query("select count(*)::int as n from findings")).rows[0]!.n, orgs: (await req.db.query("select count(*)::int as n from organizations")).rows[0]!.n }));
+  const srv = probe.listen(0);
+  const url = `http://127.0.0.1:${(srv.address() as any).port}/count`;
+  const hit = async (c: Client) => (await fetch(url, { headers: { cookie: c.cookie, origin: "http://localhost:5174" } })).json() as Promise<{ n: number; orgs: number }>;
+  const total = (await db.query("select count(*)::int as n from findings")).rows[0]!.n;
+  const [ra, rb] = [await hit(a.c), await hit(b.c)];
+  srv.close();
+  assert.equal(ra.n, 7); assert.equal(rb.n, 1); assert.ok(total > ra.n + rb.n); // each sees only its own, though more exist
+  assert.equal(ra.orgs, 1); assert.equal(rb.orgs, 1);
 });
 
 test("CSV export neutralises spreadsheet formulas", async () => {
