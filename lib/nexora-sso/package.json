@@ -1,0 +1,10 @@
+{
+  "name": "@workspace/nexora-sso",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Server-side helper for onenexora.com: builds the signed, one-time link that signs a Nexora user into NEXORA CSPM. Single file, Node built-ins only: copy src/index.ts into the Nexora console.",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "test": "tsx --test test/*.test.ts", "typecheck": "tsc -p tsconfig.json --noEmit" },
+  "devDependencies": { "@types/node": "catalog:", "tsx": "catalog:" }
+}

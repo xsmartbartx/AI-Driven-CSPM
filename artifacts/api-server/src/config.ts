@@ -41,4 +41,5 @@ export const config = {
   anthropicModel: process.env["ANTHROPIC_MODEL"] ?? "claude-haiku-5-5",
 };
 if (prod && config.resendKey && !process.env["MAIL_FROM"]) throw new Error("MAIL_FROM is required in production when RESEND_API_KEY is set");
+if (prod && config.ssoSecret && config.ssoSecret.length < 32) throw new Error("SSO_SECRET must be at least 32 characters");
 if (prod && config.origins.length === 0) throw new Error("APP_ORIGINS is required in production");
