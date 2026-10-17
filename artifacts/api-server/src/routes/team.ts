@@ -116,6 +116,7 @@ r.post("/billing/checkout", requireRole("owner"), async (req, res) => {
     client_reference_id: req.auth!.orgId, success_url: `${config.appUrl}/usage?upgraded=1`, cancel_url: `${config.appUrl}/usage`,
   });
   if (org.stripe_customer_id) body.set("customer", org.stripe_customer_id); // reuse the customer, do not create a second one
+  await req.db.release(); // no pooled connection held during the Stripe call
   const s = await fetch("https://api.stripe.com/v1/checkout/sessions", { method: "POST", headers: { authorization: `Bearer ${config.stripeSecret}`, "content-type": "application/x-www-form-urlencoded" }, body, signal: AbortSignal.timeout(15000) });
   const j: any = await s.json();
   if (!s.ok || !j.url) throw new HttpError(502, "billing_error", "Could not start checkout");
@@ -137,6 +138,7 @@ r.post("/billing/portal", requireRole("owner"), async (req, res) => {
   if (!config.stripeSecret) throw new HttpError(503, "billing_not_configured", "Billing is not set up yet");
   const cust = (await req.db.query("select stripe_customer_id from organizations where id = $1", [req.auth!.orgId])).rows[0]?.stripe_customer_id;
   if (!cust) throw bad("This organization has no subscription to manage", "no_subscription");
+  await req.db.release();
   const s = await fetch("https://api.stripe.com/v1/billing_portal/sessions", { method: "POST", headers: { authorization: `Bearer ${config.stripeSecret}`, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ customer: cust, return_url: `${config.appUrl}/usage` }), signal: AbortSignal.timeout(15000) });
   const j: any = await s.json();
   if (!s.ok || !j.url) throw new HttpError(502, "billing_error", "Could not open the billing portal");
