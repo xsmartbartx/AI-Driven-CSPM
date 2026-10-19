@@ -52,8 +52,10 @@ a.rowlink:hover .title{text-decoration:underline}
 .kv dt{color:var(--text-muted)} .kv dd{margin:0;word-break:break-word}
 pre.code{margin:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px;font:13px/20px var(--font-mono);overflow:auto;white-space:pre-wrap;word-break:break-word}
 .pre{white-space:pre-wrap}
-.dlg-back{position:fixed;inset:0;background:rgba(0,0,0,.45);display:grid;place-items:center;z-index:20;padding:16px}
-.dlg{background:var(--bg);border-radius:var(--r-lg);box-shadow:var(--shadow-pop);padding:24px;width:100%;max-width:440px;display:grid;gap:16px}
+.dlg-back{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;overflow-y:auto;z-index:20;padding:16px}
+/* margin:auto centres a short dialog and, unlike place-items, never pushes a tall one off the top of the screen: the overlay scrolls */
+.dlg{background:var(--bg);border-radius:var(--r-lg);box-shadow:var(--shadow-pop);padding:24px;width:100%;max-width:440px;display:grid;gap:16px;margin:auto}
+.dlg.wide{max-width:640px}
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:10px 16px;border-radius:var(--r-md);box-shadow:var(--shadow-pop);z-index:30;font-weight:600}
 .scroll-x{overflow-x:auto}
 .ring{position:relative;width:104px;height:104px;flex:none}

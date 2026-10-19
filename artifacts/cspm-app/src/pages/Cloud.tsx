@@ -133,7 +133,7 @@ function SetupDialog({ s, onClose }: { s: Setup; onClose: () => void }) {
     const a = document.createElement("a"); a.href = url; a.download = "nexora-cspm-role.yaml"; a.click(); URL.revokeObjectURL(url);
   };
   return (
-    <Dialog title="Create the read-only role in AWS" onClose={onClose}>
+    <Dialog title="Create the read-only role in AWS" onClose={onClose} wide>
       <ol style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 10 }}>
         <li>In the AWS console for that account, open <strong>CloudFormation → Create stack → With new resources</strong>, choose <em>Upload a template file</em>, and upload the file below (or paste it).</li>
         <li>Create the stack and tick the box that it creates an IAM role. It creates one role, <code>{s.roleArn.split("/").pop()}</code>, that trusts only AWS account <code>{s.principalAccountId}</code> with your External ID.</li>

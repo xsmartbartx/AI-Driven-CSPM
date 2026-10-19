@@ -374,6 +374,8 @@ test.describe("F09 team and roles, F10 settings", () => {
 });
 
 test.describe("F07 cloud accounts (the e2e API uses a fake AWS)", () => {
+  // a short screen: the setup dialog is taller than this, so its buttons must be reachable by scrolling
+  test.use({ viewport: { width: 1100, height: 560 } });
   const connect = async (page: any, account = "111122223333", region = "eu-west-1") => {
     await page.goto("/integrations");
     await page.getByRole("button", { name: "Connect AWS account" }).first().click();

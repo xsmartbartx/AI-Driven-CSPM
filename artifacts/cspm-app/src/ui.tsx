@@ -111,7 +111,7 @@ export function Kpi({ label, value, sub, tone }: { label: string; value: ReactNo
   );
 }
 
-export function Dialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+export function Dialog({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   const id = useId();
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -133,7 +133,7 @@ export function Dialog({ title, onClose, children }: { title: string; onClose: (
   }, [onClose]);
   return (
     <div className="dlg-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="dlg" role="dialog" aria-modal="true" aria-labelledby={id} ref={ref}>
+      <div className={`dlg${wide ? " wide" : ""}`} role="dialog" aria-modal="true" aria-labelledby={id} ref={ref}>
         <h2 id={id} className="h2" style={{ margin: 0 }}>{title}</h2>
         {children}
       </div>
