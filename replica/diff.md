@@ -8,7 +8,7 @@
   1. Stripe upgrade: coded and tested with signed fake events, needs your Stripe test keys to run for real.
   2. SSO from Nexora: endpoint built and tested, needs onenexora.com to sign tokens with `SSO_SECRET` and link here.
   3. ~~Postgres RLS~~ done in migration 0003, tested on real Postgres including a non-superuser owner. Remaining caveat: your production database must allow the `cspm_app` role (see `deploy.md`).
-- **Should-haves: 10 of 12.** Missing: AWS account connection (Phase 1b), email (needs provider).
+- **Should-haves: 11 of 12 built.** AWS account connection is built (connect, verify, scan; tested with fakes and a mock STS) but never run on real AWS and off by default, so it counts as partial; email is built and waits for your Resend account.
 - **Could-haves: 1 of 9.** Not built: AI brief, AI Q&A, Azure/GCP, Kubernetes, attack paths, notifications, Terraform fixes, admin portal; reports = CSV only.
 - Tests: 9 engine + 27 API + 33 e2e (Chrome, axe AA on ~20 screens) all green. Open bugs: none S1; O1 (no email) is S2.
 
@@ -24,5 +24,5 @@
 1. Resend account + verified domain + key (the code is built and tested with a mocked provider; see `replica/email-setup.md`).
 2. Stripe test-mode end-to-end run and the real Starter price.
 3. Nexora token issuer on onenexora.com + redirect from console (the SSO handoff).
-4. AWS read-only connector (cross-account role + external ID).
-5. ~~Enable Postgres RLS~~ done. Next: the AWS connector, or whichever blocker above you can unblock first.
+4. First real AWS run in a sandbox account (`replica/aws-setup.md`).
+5. ~~Postgres RLS~~ and ~~the AWS connector~~ are built. What is left is yours to unblock: Resend, Stripe, the Nexora-side SSO change, a sandbox AWS run.

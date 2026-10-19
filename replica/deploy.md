@@ -36,6 +36,9 @@ Migration `0003_rls` makes Postgres itself refuse cross-tenant access, on top of
 - **Your `DATABASE_URL` user must own the tables** (it runs the migrations, so it does) and must be allowed to `SET ROLE cspm_app`. Migration 0003 creates the role and grants it to that user. If your provider forbids creating roles, ask an administrator to run `create role cspm_app nologin; grant cspm_app to <app user>;` before the first start. If the role is unusable the API **refuses to start** and says why. `RLS_ENFORCE=0` runs without it and logs a warning; use it only knowingly.
 - **Connections:** each in-flight authenticated request holds one pooled connection until its response closes (released early around slow external calls). Size `DB_POOL_MAX` for your concurrency and check Postgres `max_connections`. **A transaction-mode pooler (pgbouncer in transaction mode, the Supabase pooler on port 6543) is not compatible**, because role and org are session settings; use a direct or session-mode connection.
 
+## AWS connector
+Off by default. To enable it set `CSPM_AWS_ACCOUNT_ID` and give the API process AWS credentials that may `sts:AssumeRole`; full steps, the security model and a first-run test plan with a sandbox account are in `replica/aws-setup.md`. It has never run against real AWS, so test it with a sandbox account before offering it to customers. The production bundle includes the AWS SDK (about 6 MB).
+
 ## Target layout
 | what | host name | served by |
 | --- | --- | --- |
@@ -79,7 +82,7 @@ Not set up (needs your accounts): error tracking (Sentry or host), uptime checks
 `.github/workflows/ci.yml`: install, schema-generated check, audit, typecheck, unit + API tests (embedded and real Postgres service), builds, Playwright. Never run against production.
 
 ## Known gaps to tell users honestly
-Paste-config only (no live AWS yet), rule set is 9 rules over 4 resource types, compliance mapping is indicative, attack paths / generated fixes / AWS connect are roadmap, no Safari/Firefox testing, no screen-reader pass, no load testing.
+Paste-config is the supported path; the AWS connector is built but never run on real AWS and off by default; rule set is 9 rules over 4 resource types, compliance mapping is indicative, attack paths and generated fixes are roadmap, no Safari/Firefox testing, no screen-reader pass, no load testing.
 
 ## Go / no-go
 **Staging: go**, once you pick hosts. **Public launch: no-go** until email, Stripe live test, SSO handoff, legal review. Say "go" for each account step you want me to prepare further, and tell me the host you choose so I can write exact deploy commands for it.

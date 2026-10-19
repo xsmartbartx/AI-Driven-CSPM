@@ -15,7 +15,7 @@ Not shippable yet: 1 must-have features are not done.
 
 ## Missing, in build order
 - [must] billing: Usage and plan page + Stripe upgrade, partial  (checkout+webhook coded and unit-tested; not run against real Stripe (needs keys))
-- [should] integrations: AWS read-only account connection (role + external ID), no  (F07 phase 1b)
+- [should] integrations: AWS read-only account connection (role + external ID), partial  (built; never run on real AWS; replica/aws-setup.md)
 - [could] skip: Agentless disk snapshot scanning, no  (out of scale)
 - [could] skip: Licensed compliance benchmark text, no  (map IDs only)
 - [could] skip: Microsoft Secure Score algorithm, no  (proprietary; own score instead)

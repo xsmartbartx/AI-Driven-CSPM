@@ -5,7 +5,6 @@ const COPY: Record<string, { title: string; body: string }> = {
   "attack-paths": { title: "Attack paths", body: "Chains such as internet → public server → over-privileged role → production database, shown as one risk instead of many alerts. This needs live cloud connections to know how resources relate, so it follows account connection." },
   ai: { title: "AI Security Center", body: "A daily brief and questions answered from your own findings. For now, open any finding and choose “Explain this finding”." },
   remediation: { title: "Remediation", body: "Generated Terraform fixes and pull requests for review. For now, every finding shows the manual fix." },
-  integrations: { title: "Cloud accounts", body: "Connect AWS with a read-only role so scans run without pasting configs. Azure, GCP and Kubernetes follow. Today CSPM scans the configuration you paste." },
 };
 
 export function Planned({ name }: { name: string }) {
