@@ -14,7 +14,7 @@ export default defineConfig({
   webServer: [
     {
       command: "npx tsx test/support/e2e-server.ts", cwd: "../artifacts/api-server", url: `http://localhost:${API}/api/healthz`, reuseExistingServer: false, timeout: 60_000,
-      env: { PORT: String(API), DATA_DIR: ":memory:", NODE_ENV: "development", RATE_LIMIT_DISABLED: "1", JWT_SECRET: "e2e-secret", SSO_SECRET: "e2e-sso",
+      env: { PORT: String(API), DATA_DIR: ":memory:", NODE_ENV: "development", RATE_LIMIT_DISABLED: "1", JWT_SECRET: "e2e-secret", SSO_SECRET: "e2e-sso-secret-with-at-least-32-characters",
         APP_ORIGINS: `http://localhost:${APP},http://localhost:${SITE}`, APP_URL: `http://localhost:${APP}` },
     },
     { command: "npx vite", cwd: "../artifacts/cspm-app", url: `http://localhost:${APP}`, reuseExistingServer: false, env: { PORT: String(APP), API_PROXY: `http://localhost:${API}` } },

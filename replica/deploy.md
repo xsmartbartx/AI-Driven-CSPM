@@ -72,6 +72,13 @@ Front-end build vars: `VITE_API_URL=https://api.cspm.onenexora.com` (both), `VIT
 4. In test mode: upgrade with `4242 4242 4242 4242`, check the plan flips and quota rises; cancel in the portal and check it drops to Free; try the decline card `4000 0000 0000 0002`.
 5. Repeat in live mode with live keys, one real purchase and a refund.
 
+## Helper scripts and guides (written and tested here; they need your accounts to run)
+| item | what | guide |
+| --- | --- | --- |
+| `deploy/check-email.mjs` | checks your Resend key, domain verification and sends a test email | `replica/email-setup.md` |
+| `deploy/stripe-test-setup.mjs` | creates the test-mode product, $19 price, webhook and portal config; prints env vars | `replica/stripe-setup.md` |
+| `lib/nexora-sso` | one-file helper for the Nexora console to mint sign-in links | `replica/nexora-sso.md` |
+
 ## Nexora SSO handoff (needs a change on onenexora.com)
 The console server signs a 2-minute, one-use token and redirects the browser to the URL it prints. Reference implementation: `deploy/make-sso-token.mjs` (HMAC-SHA256, claims sub, email, name, org, orgName, role, jti, exp). Rules: sign server-side only, share `SSO_SECRET` with the API only through your secret store, role claim is capped at `admin`, the first user of a new Nexora org becomes the CSPM owner. Add an "Open CSPM" button in the Nexora console that hits that route.
 

@@ -3,11 +3,13 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import type { Server } from "node:http";
 
-process.env["SSO_SECRET"] = "test-sso-secret";
+const SSO = "test-sso-secret-with-at-least-32-characters-ok"; // the API and the Nexora helper both require 32+
+process.env["SSO_SECRET"] = SSO;
 process.env["STRIPE_WEBHOOK_SECRET"] = "whsec_test";
 process.env["APP_ORIGINS"] = "http://localhost:5174";
 process.env["STRIPE_SECRET_KEY"] = "sk_test_dummy_never_called";
 process.env["STRIPE_PRICE_STARTER"] = "price_dummy";
+process.env["STRIPE_PORTAL_CONFIG"] = "bpc_test_config";
 process.env["NODE_ENV"] = "test";
 
 const { openDb } = await import("@workspace/db");
@@ -335,7 +337,7 @@ test("API keys: shown once, authenticate as analyst, revocable", async () => {
 
 test("SSO handoff from Nexora", async () => {
   const base_ = { sub: "nx-user-1", email: "Person@Example.com", name: "Pat", org: "nx-org-1", orgName: "Acme" };
-  const sso = (o: object = {}, secret = "test-sso-secret", ttl = 120) => signJwt({ ...base_, jti: `jti-${Math.random()}-${Date.now()}`, ...o }, secret, ttl);
+  const sso = (o: object = {}, secret = SSO, ttl = 120) => signJwt({ ...base_, jti: `jti-${Math.random()}-${Date.now()}`, ...o }, secret, ttl);
   const tok = sso();
   const c = new Client();
   const r = await c.get(`/auth/sso?token=${tok}`);
@@ -353,7 +355,7 @@ test("SSO handoff from Nexora", async () => {
   const c3 = new Client();
   await c3.get(`/auth/sso?token=${sso({ sub: "nx-user-3", email: "three@example.com", role: "owner" })}`);
   assert.equal((await c3.get("/auth/me")).json.role, "viewer");
-  for (const bad of [sso({}, "other-secret"), sso({}, "test-sso-secret", -10), sso({}, "test-sso-secret", 86400), signJwt(base_, "test-sso-secret", 120), "garbage"]) {
+  for (const bad of [sso({}, "other-secret"), sso({}, SSO, -10), sso({}, SSO, 86400), signJwt(base_, SSO, 120), "garbage"]) {
     assert.equal((await new Client().get(`/auth/sso?token=${bad}`)).status, 401);
   }
   const [h, , s] = tok.split(".");
@@ -426,6 +428,22 @@ test("Stripe: subscription lifecycle events; a failed handler is not marked seen
   assert.equal((await db.query("select 1 from stripe_events where id = $1", [evId])).rows.length, 0);
 });
 
+test("billing portal sessions use the configured portal configuration (the one the setup script created)", async () => {
+  const { c, me } = await signup();
+  await db.query("update organizations set plan = 'starter', stripe_customer_id = $2 where id = $1", [me.org.id, `cus_portal_${RUN}`]);
+  const real = globalThis.fetch; let seen: { url: string; body: URLSearchParams } | null = null;
+  globalThis.fetch = (async (url: any, init: any) => {
+    if (String(url).startsWith("https://api.stripe.com/")) { seen = { url: String(url), body: new URLSearchParams(init.body) }; return new Response(JSON.stringify({ url: "https://billing.example.test/session" }), { status: 200 }); }
+    return real(url, init);
+  }) as typeof fetch;
+  try {
+    const r = await c.post("/billing/portal");
+    assert.equal(r.status, 200, r.text); assert.equal(r.json.url, "https://billing.example.test/session");
+  } finally { globalThis.fetch = real; }
+  assert.equal(seen!.url, "https://api.stripe.com/v1/billing_portal/sessions");
+  assert.equal(seen!.body.get("configuration"), "bpc_test_config"); assert.equal(seen!.body.get("customer"), `cus_portal_${RUN}`);
+});
+
 test("billing: no portal without a subscription; second checkout is refused for a paid org", async () => {
   const { c, me } = await signup();
   assert.equal((await c.post("/billing/portal")).json.error.code, "no_subscription");
@@ -450,7 +468,7 @@ test("an invited SSO-only user accepts through their signed-in session; nobody e
   const owner = await signup();
   const email = `sso-inv-${Date.now()}@example.com`;
   const sso = new Client();
-  await sso.get(`/auth/sso?token=${signJwt({ sub: `nx-inv-${Date.now()}`, email, org: `nx-org-inv-${Date.now()}`, orgName: "Own", jti: `jti-inv-${Date.now()}` }, "test-sso-secret", 120)}`);
+  await sso.get(`/auth/sso?token=${signJwt({ sub: `nx-inv-${Date.now()}`, email, org: `nx-org-inv-${Date.now()}`, orgName: "Own", jti: `jti-inv-${Date.now()}` }, SSO, 120)}`);
   assert.equal((await sso.get("/auth/me")).json.user.hasPassword, false);
   const inv = await owner.c.post("/team/invite", { email, role: "analyst" });
   const token = inv.json.link.split("/invite/")[1];
@@ -467,7 +485,7 @@ test("an invited SSO-only user accepts through their signed-in session; nobody e
 });
 
 test("SSO-only accounts can delete themselves by typing their email", async () => {
-  const tok = signJwt({ sub: "nx-del-1", email: "sso-del@example.com", org: "nx-org-del", orgName: "Del", jti: `jti-del-${Date.now()}` }, "test-sso-secret", 120);
+  const tok = signJwt({ sub: "nx-del-1", email: "sso-del@example.com", org: "nx-org-del", orgName: "Del", jti: `jti-del-${Date.now()}` }, SSO, 120);
   const c = new Client();
   await c.get(`/auth/sso?token=${tok}`);
   assert.equal((await c.get("/auth/me")).json.user.hasPassword, false);
@@ -615,9 +633,25 @@ test("invites are emailed (HTML escaped); a mail failure does not fail the invit
   assert.equal(inv2.status, 201); assert.equal(inv2.json.emailed, false); assert.ok(inv2.json.link.includes("/invite/")); // link still usable
 });
 
+test("links built by the Nexora helper (lib/nexora-sso) are accepted by the API, once, and only with the shared secret", async () => {
+  const { createCspmSignInUrl } = await import("@workspace/nexora-sso");
+  const user: import("@workspace/nexora-sso").CspmUser = { id: `kit-${Date.now()}`, email: `Kit-${Date.now()}@example.com`, name: "Kit", orgId: `kit-org-${Date.now()}`, orgName: "Kit Org" };
+  const link = (secret: string, u = user) => { const x = new URL(createCspmSignInUrl({ secret, apiUrl: "http://localhost:8080", user: u })); return `/auth/sso${x.search}`; };
+  assert.equal((await new Client().get(link("a-different-secret-that-is-long-enough-1234"))).status, 401);
+  const c = new Client();
+  const good = link(SSO);
+  assert.equal((await c.get(good)).status, 302);
+  const me = (await c.get("/auth/me")).json;
+  assert.equal(me.user.email, user.email.toLowerCase()); assert.equal(me.org.name, "Kit Org"); assert.equal(me.role, "owner"); assert.equal(me.user.emailVerified, true);
+  assert.equal((await new Client().get(good)).status, 401); // one-time
+  const c2 = new Client();
+  await c2.get(link(SSO, { ...user, id: `${user.id}-b`, email: `b-${user.email}`, role: "admin" }));
+  assert.equal((await c2.get("/auth/me")).json.role, "admin"); // a later user of the same Nexora org joins with the role Nexora asked for (capped at admin)
+});
+
 test("Nexora SSO users are verified immediately", async () => {
   const c = new Client();
-  await c.get(`/auth/sso?token=${signJwt({ sub: `nx-ver-${Date.now()}`, email: `ver-${Date.now()}@example.com`, org: `nx-o-ver-${Date.now()}`, jti: `jti-ver-${Date.now()}` }, "test-sso-secret", 120)}`);
+  await c.get(`/auth/sso?token=${signJwt({ sub: `nx-ver-${Date.now()}`, email: `ver-${Date.now()}@example.com`, org: `nx-o-ver-${Date.now()}`, jti: `jti-ver-${Date.now()}` }, SSO, 120)}`);
   assert.equal((await c.get("/auth/me")).json.user.emailVerified, true);
 });
 

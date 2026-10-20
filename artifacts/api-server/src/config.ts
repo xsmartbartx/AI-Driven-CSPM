@@ -29,6 +29,8 @@ export const config = {
   trustProxy: process.env["TRUST_PROXY"] === "1",
   stripeSecret: process.env["STRIPE_SECRET_KEY"] ?? "",
   stripeWebhookSecret: process.env["STRIPE_WEBHOOK_SECRET"] ?? "",
+  /** Optional: the portal configuration created by deploy/stripe-test-setup.mjs. Unset = Stripe's default configuration. */
+  stripePortalConfig: process.env["STRIPE_PORTAL_CONFIG"] ?? "",
   stripeStarterPrice: process.env["STRIPE_PRICE_STARTER"] ?? "",
   /** Resend (https://resend.com). Without a key: dev logs emails to the console, production sends nothing. */
   /** Database-level tenant isolation (row level security). On unless RLS_ENFORCE=0. */
@@ -44,4 +46,5 @@ export const config = {
 };
 if (prod && config.resendKey && !process.env["MAIL_FROM"]) throw new Error("MAIL_FROM is required in production when RESEND_API_KEY is set");
 if (config.awsAccountId && !/^\d{12}$/.test(config.awsAccountId)) throw new Error("CSPM_AWS_ACCOUNT_ID must be a 12-digit AWS account id");
+if (prod && config.ssoSecret && config.ssoSecret.length < 32) throw new Error("SSO_SECRET must be at least 32 characters");
 if (prod && config.origins.length === 0) throw new Error("APP_ORIGINS is required in production");
