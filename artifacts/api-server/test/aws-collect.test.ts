@@ -128,6 +128,19 @@ test("pagination across S3, EC2, IAM and RDS", async () => {
   assert.deepEqual([count("s3_bucket"), count("security_group"), count("iam_policy"), count("database")], [7, 7, 7, 7]);
 });
 
+test("hitting the S3 or IAM cap exactly, with more pages still to read, is reported as incomplete", async () => {
+  const buckets = Object.fromEntries(Array.from({ length: 301 }, (_, i) => [`b${i}`, { enc: true }]));
+  const s3 = await collectWithClients(fake({ buckets, pageSize: 100 }), ctx);
+  assert.equal(s3.complete, false); assert.ok(s3.notes.some((n) => /S3: more than 300 buckets/.test(n)));
+  const policies = Array.from({ length: 301 }, (_, i) => ({ name: `p${i}`, arn: `arn:p/${i}`, doc: { Statement: [] } }));
+  const iam = await collectWithClients(fake({ policies, pageSize: 100 }), ctx);
+  assert.equal(iam.complete, false); assert.ok(iam.notes.some((n) => /IAM: more than 300 attached/.test(n)));
+  assert.equal(iam.resources.filter((x) => x.type === "iam_policy").length, 300);
+  // exactly 300 and nothing more is complete as far as the cap goes
+  const exact = await collectWithClients(fake({ buckets: Object.fromEntries(Array.from({ length: 300 }, (_, i) => [`e${i}`, { enc: true }])), pageSize: 100 }), ctx);
+  assert.equal(exact.notes.some((n) => /S3: more than/.test(n)), false);
+});
+
 test("one failing service does not stop the others; it is reported and the result is incomplete", async () => {
   const r = await collectWithClients(fake({ buckets: { a: { enc: true } }, dbs: [{ DBInstanceIdentifier: "d" }], fail: { ec2: awsErr("UnauthorizedOperation"), iam: awsErr("ThrottlingException") } }), ctx);
   assert.deepEqual(r.resources.map((x) => x.type).sort(), ["database", "s3_bucket"]);

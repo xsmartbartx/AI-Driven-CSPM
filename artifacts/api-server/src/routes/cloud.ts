@@ -82,14 +82,16 @@ r.post("/cloud-accounts/:id/verify", requireRole("admin"), rateLimit("aws-verify
 });
 
 r.post("/cloud-accounts/:id/scan", requireRole("analyst"), rateLimit("aws-scan", 12, 3600_000, byOrg), async (req, res) => {
-  const row = await load(req);
-  if (row.status !== "connected") throw conflict("Verify the connection first.", "not_verified");
-  if (running.has(row.id)) throw conflict("A scan of this account is already running.", "scan_running");
-  // refuse before reading from AWS if the plan has no scans left, so no AWS calls are wasted
-  const u = await usageOf(req.db, req.auth!.orgId);
-  if (u.scans.used >= u.scans.limit) throw new HttpError(402, "quota_exceeded", `You have used all ${PLANS[u.plan].scans} scans on the ${u.planLabel} plan this month.`);
-  running.add(row.id);
+  const id = uuidParam(req.params["id"]);
+  // Reserve the slot in the same tick as the check: any await between them would let two simultaneous requests both pass.
+  if (running.has(id)) throw conflict("A scan of this account is already running.", "scan_running");
+  running.add(id);
   try {
+    const row = await load(req);
+    if (row.status !== "connected") throw conflict("Verify the connection first.", "not_verified");
+    // refuse before reading from AWS if the plan has no scans left, so no AWS calls are wasted
+    const u = await usageOf(req.db, req.auth!.orgId);
+    if (u.scans.used >= u.scans.limit) throw new HttpError(402, "quota_exceeded", `You have used all ${PLANS[u.plan].scans} scans on the ${u.planLabel} plan this month.`);
     await req.db.release(); // AWS reads can take a while: do not hold a pooled connection
     let found;
     try { found = await req.aws.collect(target(row)); }
@@ -106,7 +108,7 @@ r.post("/cloud-accounts/:id/scan", requireRole("analyst"), rateLimit("aws-scan",
     await req.db.query("update cloud_accounts set last_sync_at = now(), last_scan_id = $2, last_error = null, updated_at = now() where id = $1", [row.id, result.id]);
     await audit(req, "cloud.scan", `${row.accountId}/${row.region}`);
     res.status(201).json({ ...result, notes: found.notes, complete: found.complete });
-  } finally { running.delete(row.id); }
+  } finally { running.delete(id); }
 });
 
 r.delete("/cloud-accounts/:id", requireRole("admin"), async (req, res) => {

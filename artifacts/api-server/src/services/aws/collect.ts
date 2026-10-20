@@ -54,6 +54,7 @@ async function collectS3(c: AwsClients, notes: string[], room: () => number): Pr
     for (const b of r.Buckets ?? []) if (b.Name) names.push(b.Name);
     token = r.ContinuationToken;
   } while (token && names.length < MAX_BUCKETS);
+  if (token) { notes.push(`S3: more than ${MAX_BUCKETS} buckets exist; only the first ${MAX_BUCKETS} were checked.`); ok = false; } // the cap stopped paging with more still to read
   let list = names;
   if (list.length > Math.min(MAX_BUCKETS, room())) { list = list.slice(0, Math.min(MAX_BUCKETS, room())); notes.push(`S3: only the first ${list.length} of ${names.length} buckets were checked.`); ok = false; }
   let failed = 0, deniedCount = 0;
@@ -128,6 +129,7 @@ async function collectIam(c: AwsClients, accountId: string, notes: string[], roo
     policies.push(...(r.Policies ?? []));
     marker = r.IsTruncated ? r.Marker : undefined;
   } while (marker && policies.length < MAX_POLICIES);
+  if (marker) { notes.push(`IAM: more than ${MAX_POLICIES} attached customer-managed policies exist; only the first ${MAX_POLICIES} were checked.`); ok = false; }
   let list = policies;
   const cap = Math.min(MAX_POLICIES, room());
   if (list.length > cap) { notes.push(`IAM: only the first ${cap} of ${policies.length} attached customer-managed policies were checked.`); list = list.slice(0, cap); ok = false; }
