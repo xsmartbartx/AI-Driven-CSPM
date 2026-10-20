@@ -12,6 +12,11 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-ec2": "^3.1152.0",
+    "@aws-sdk/client-iam": "^3.1152.0",
+    "@aws-sdk/client-rds": "^3.1152.0",
+    "@aws-sdk/client-s3": "^3.1152.0",
+    "@aws-sdk/client-sts": "^3.1152.0",
     "@workspace/cspm-engine": "workspace:*",
     "@workspace/db": "workspace:*",
     "cors": "^2.8.6",

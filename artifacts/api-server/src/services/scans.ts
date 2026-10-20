@@ -39,7 +39,7 @@ export function demoScan(config: unknown) {
   return { resourceCount: resources.length, findings, unknownTypes, counts, score: postureScore(counts) };
 }
 
-export async function runScan(db: { tx: <T>(fn: (q: Queryable) => Promise<T>) => Promise<T> }, auth: Auth, config: unknown) {
+export async function runScan(db: { tx: <T>(fn: (q: Queryable) => Promise<T>) => Promise<T> }, auth: Auth, config: unknown, opts: { accountId?: string; complete?: boolean } = {}) {
   const { resources, errors } = parseInput(config);
   if (errors.length) throw bad(errors.join(" "), "invalid_config");
   const { findings, unknownTypes } = evaluate(resources);
@@ -54,23 +54,24 @@ export async function runScan(db: { tx: <T>(fn: (q: Queryable) => Promise<T>) =>
       throw new HttpError(402, "quota_exceeded", `You have used all ${PLANS[plan].scans} scans on the ${PLANS[plan].label} plan this month.`);
 
     const { rows: s } = await q.query(
-      "insert into scans (org_id, created_by, source, status, resource_count) values ($1,$2,'paste','completed',$3) returning id, created_at", [auth.orgId, auth.userId, resources.length]);
+      "insert into scans (org_id, created_by, source, account_id, status, resource_count) values ($1,$2,$3,$4,'completed',$5) returning id, created_at",
+      [auth.orgId, auth.userId, opts.accountId ? "account" : "paste", opts.accountId ?? null, resources.length]);
     const scanId = s[0].id as string;
     await q.query("insert into usage_events (org_id, kind, period) values ($1,'scan',$2)", [auth.orgId, per]);
 
     const assetId = new Map<string, string>();
     for (const r of resources) {
       const { rows } = await q.query(
-        `insert into assets (org_id, provider, type, name, environment, criticality, owner, raw)
-         values ($1,'aws',$2,$3,$4,$5,$6,$7::jsonb)
+        `insert into assets (org_id, provider, type, name, environment, criticality, owner, raw, account_id)
+         values ($1,'aws',$2,$3,$4,$5,$6,$7::jsonb,$8)
          on conflict (org_id, provider, type, name) do update
            set environment = excluded.environment, criticality = excluded.criticality, owner = excluded.owner,
-               raw = excluded.raw, last_seen_at = now(), updated_at = now()
+               raw = excluded.raw, account_id = coalesce(excluded.account_id, assets.account_id), last_seen_at = now(), updated_at = now()
          returning id`,
         [auth.orgId, r.type, r.name,
           ["production", "staging", "development"].includes(r.environment as string) ? r.environment : "production",
           Math.min(10, Math.max(1, Math.round(Number(r.criticality ?? defaultCriticality(r))) || 5)),
-          typeof r.owner === "string" ? r.owner.slice(0, 100) : null, JSON.stringify(r)]);
+          typeof r.owner === "string" ? r.owner.slice(0, 100) : null, JSON.stringify(r), opts.accountId ?? null]);
       assetId.set(`${r.type}/${r.name}`, rows[0].id);
     }
 
@@ -114,6 +115,14 @@ export async function runScan(db: { tx: <T>(fn: (q: Queryable) => Promise<T>) =>
       fixed++;
     }
 
+    // A COMPLETE account scan also knows which resources are gone: findings on assets of this account that were not
+    // seen this time are fixed. An incomplete scan (a denied service, the resource cap) must never conclude that.
+    if (opts.accountId && opts.complete) {
+      const gone = await q.query(
+        "update findings set status = 'fixed', updated_at = now() where org_id = $1 and status in ('open','accepted') and asset_id in (select id from assets where org_id = $1 and account_id = $2 and id <> all($3::uuid[])) returning id",
+        [auth.orgId, opts.accountId, ids]);
+      fixed += gone.rows.length;
+    }
     const c = await openCounts(q, auth.orgId);
     const score = postureScore(c);
     const counts = { new: created + reopened, fixed, persisting, open: c };

@@ -21,7 +21,7 @@ Compliance frameworks (CIS NIST ISO PCI GDPR) mapped by control ID,compliance,sh
 AI explanation per finding,ai,should,no,yes,rule-grounded text; LLM used only if ANTHROPIC_API_KEY set (untested live)
 AI daily security brief,ai,could,no,no,S14
 AI Q&A over own findings,ai,could,no,no,tenant-scoped retrieval
-AWS read-only account connection (role + external ID),integrations,should,roadmap,no,F07 phase 1b
+AWS read-only account connection (role + external ID),integrations,should,roadmap,partial,"built: connect, verify, scan (S3, SG, IAM customer policies, RDS); tested with fakes + mock STS; never run on real AWS, off by default (replica/aws-setup.md)"
 Azure and GCP connectors,integrations,could,no,no,phase 2
 Kubernetes checks,integrations,could,no,no,phase 2
 Attack path analysis,attack-paths,could,no,no,phase 2 graph

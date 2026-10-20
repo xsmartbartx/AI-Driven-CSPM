@@ -373,6 +373,109 @@ test.describe("F09 team and roles, F10 settings", () => {
   });
 });
 
+test.describe("F07 cloud accounts (the e2e API uses a fake AWS)", () => {
+  // a short screen: the setup dialog is taller than this, so its buttons must be reachable by scrolling
+  test.use({ viewport: { width: 1100, height: 560 } });
+  const connect = async (page: any, account = "111122223333", region = "eu-west-1") => {
+    await page.goto("/integrations");
+    await page.getByRole("button", { name: "Connect AWS account" }).first().click();
+    await page.getByLabel(/AWS account id/).fill(account);
+    await page.getByLabel("Region to scan").selectOption(region);
+    await page.getByRole("button", { name: "Continue" }).click();
+  };
+
+  test("F07-H1 connect, set up the role, verify, scan, see findings, disconnect", async ({ page }) => {
+    await signUp(page);
+    await page.getByRole("link", { name: "Cloud accounts" }).click();
+    await expect(page.getByText("No AWS account connected")).toBeVisible();
+    await a11y(page, "cloud accounts empty");
+    await connect(page);
+    const dlg = page.getByRole("dialog");
+    await expect(dlg.getByRole("heading", { name: "Create the read-only role in AWS" })).toBeVisible();
+    await expect(dlg.locator("dd code", { hasText: /^123456789012$/ })).toBeVisible(); // NEXORA's account to trust
+    await expect(dlg.locator("dd code", { hasText: /^nx-[\w-]{20,}$/ })).toBeVisible(); // the External ID
+    await expect(dlg.getByLabel("CloudFormation template")).toContainText("sts:ExternalId");
+    await expect(dlg.getByLabel("CloudFormation template")).not.toContainText("s3:GetObject");
+    await a11y(page, "aws setup dialog");
+    await dlg.getByRole("button", { name: "Done" }).click();
+
+    const card = page.getByRole("region", { name: "AWS account 111122223333 in eu-west-1" });
+    await expect(card.getByText("Not verified")).toBeVisible();
+    await expect(card.getByRole("button", { name: "Scan now" })).toHaveCount(0); // cannot scan before verifying
+    await card.getByRole("button", { name: "Verify connection" }).click();
+    await expect(card.getByText("Connected", { exact: true })).toBeVisible();
+    await card.getByRole("button", { name: "Scan now" }).click();
+    await expect(page.getByText(/Scan finished: 4 findings/)).toBeVisible();
+    await expect(page.getByText("only customer-managed policies")).toBeVisible(); // notes are shown, not hidden
+    await a11y(page, "cloud accounts connected");
+
+    await page.getByRole("link", { name: "See the result" }).click();
+    await expect(page.getByRole("heading", { name: "Scan result" })).toBeVisible();
+    await expect(page.getByText("Policy grants full administrator access")).toBeVisible();
+    await page.goto("/assets");
+    await expect(page.getByText("111122223333-public-assets")).toBeVisible();
+    await page.goto("/scans");
+    await expect(page.getByRole("row")).toHaveCount(2);
+
+    await page.goto("/integrations");
+    page.once("dialog", (d) => d.accept());
+    await page.getByRole("button", { name: "Disconnect" }).click();
+    await expect(page.getByText("No AWS account connected")).toBeVisible();
+    await page.goto("/findings");
+    await expect(page.getByRole("row")).toHaveCount(5); // history stays: 4 findings + header
+  });
+
+  test("F07-N1 a role AWS cannot assume shows a clear message and keeps the connection as 'needs attention'", async ({ page }) => {
+    await signUp(page);
+    await connect(page, "000000000000");
+    await page.getByRole("dialog").getByRole("button", { name: "Done" }).click();
+    const card = page.getByRole("region", { name: /AWS account 000000000000/ });
+    await card.getByRole("button", { name: "Verify connection" }).click();
+    await expect(card.getByRole("alert")).toContainText("could not assume the role");
+    await expect(card.getByText("Needs attention")).toBeVisible();
+    await card.getByRole("button", { name: "Setup instructions" }).click(); // the instructions can be reopened
+    await expect(page.getByRole("dialog").locator("dd code", { hasText: /^nx-/ })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await a11y(page, "cloud accounts error");
+  });
+
+  test("F07-N2 input errors: bad account id and duplicates", async ({ page }) => {
+    await signUp(page);
+    await page.goto("/integrations");
+    await page.getByRole("button", { name: "Connect AWS account" }).first().click();
+    await page.getByLabel(/AWS account id/).fill("12345");
+    await page.getByRole("button", { name: "Continue" }).click(); // native pattern validation stops it
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await connect(page);
+    await page.getByRole("dialog").getByRole("button", { name: "Done" }).click();
+    await connect(page); // same account and region again
+    await expect(page.getByRole("dialog").getByRole("alert")).toContainText("already connected");
+  });
+
+  test("F07-P1 a viewer sees the connection but no way to change or scan it, and never the External ID", async ({ page, browser }) => {
+    await signUp(page);
+    await connect(page);
+    await page.getByRole("dialog").getByRole("button", { name: "Done" }).click();
+    await page.goto("/team");
+    const email = uniqueEmail("cloudviewer");
+    await page.getByLabel("Email").fill(email);
+    await page.locator("label.field", { hasText: "Role" }).locator("select").selectOption("viewer");
+    await page.getByRole("button", { name: "Create invite link" }).click();
+    const link = await page.getByLabel("Invite link").inputValue();
+    const { ctx, page: v } = await newUserContext(browser);
+    await v.goto(new URL(link).pathname);
+    await v.getByLabel("Password").fill(PASSWORD);
+    await v.getByRole("button", { name: "Accept invitation" }).click();
+    await expect(v.getByRole("heading", { name: "Overview" })).toBeVisible(); // wait until the session exists
+    await v.goto("/integrations");
+    await expect(v.getByRole("region", { name: "AWS account 111122223333 in eu-west-1" })).toBeVisible();
+    for (const name of ["Connect AWS account", "Verify connection", "Scan now", "Disconnect", "Setup instructions"]) await expect(v.getByRole("button", { name })).toHaveCount(0);
+    await expect(v.getByText(/nx-/)).toHaveCount(0);
+    await ctx.close();
+  });
+});
+
 test.describe("F08 quota and upgrade", () => {
   test("F08-N1 free plan stops at 10 scans with a clear message", async ({ page }) => {
     await signUp(page);

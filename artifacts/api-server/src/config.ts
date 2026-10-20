@@ -37,11 +37,14 @@ export const config = {
   rls: process.env["RLS_ENFORCE"] !== "0",
   /** Each in-flight authenticated request holds one connection (released when the response closes). */
   poolMax: Math.max(2, Number(process.env["DB_POOL_MAX"] ?? 10) || 10),
+  /** NEXORA's own AWS account id (12 digits). Set it to enable AWS connections; the process also needs AWS credentials that may call sts:AssumeRole. */
+  awsAccountId: process.env["CSPM_AWS_ACCOUNT_ID"] ?? "",
   resendKey: process.env["RESEND_API_KEY"] ?? "",
   mailFrom: process.env["MAIL_FROM"] ?? "NEXORA CSPM <no-reply@cspm.onenexora.com>",
   anthropicKey: process.env["ANTHROPIC_API_KEY"] ?? "",
   anthropicModel: process.env["ANTHROPIC_MODEL"] ?? "claude-haiku-5-5",
 };
 if (prod && config.resendKey && !process.env["MAIL_FROM"]) throw new Error("MAIL_FROM is required in production when RESEND_API_KEY is set");
+if (config.awsAccountId && !/^\d{12}$/.test(config.awsAccountId)) throw new Error("CSPM_AWS_ACCOUNT_ID must be a 12-digit AWS account id");
 if (prod && config.ssoSecret && config.ssoSecret.length < 32) throw new Error("SSO_SECRET must be at least 32 characters");
 if (prod && config.origins.length === 0) throw new Error("APP_ORIGINS is required in production");

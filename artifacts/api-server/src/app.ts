@@ -6,14 +6,18 @@ import { config } from "./config";
 import { logger } from "./lib/logger";
 import { HttpError } from "./lib/errors";
 import { createMailer, type Mailer } from "./services/mail";
+import { createAwsConnector, disabledAwsConnector } from "./services/aws/connector";
+import type { AwsConnector } from "./services/aws/types";
+import cloudRouter from "./routes/cloud";
 import healthRouter from "./routes/health";
 import authRouter from "./routes/auth";
 import scansRouter from "./routes/scans";
 import findingsRouter from "./routes/findings";
 import teamRouter from "./routes/team";
 
-export function createApp(db: Db, opts: { mailer?: Mailer } = {}): Express {
+export function createApp(db: Db, opts: { mailer?: Mailer; aws?: AwsConnector } = {}): Express {
   const mailer = opts.mailer ?? createMailer();
+  const aws = opts.aws ?? (config.awsAccountId ? createAwsConnector(config.awsAccountId) : disabledAwsConnector);
   const app: Express = express();
   app.disable("x-powered-by");
   if (config.trustProxy) app.set("trust proxy", 1);
@@ -38,14 +42,14 @@ export function createApp(db: Db, opts: { mailer?: Mailer } = {}): Express {
   app.use(cors({ origin: (o, cb) => cb(null, !o || config.origins.includes(o)), credentials: true, allowedHeaders: ["content-type", "x-csrf", "authorization"], methods: ["GET", "POST", "PATCH", "DELETE"] }));
   app.use(express.json({ limit: "1mb", verify: (req, _res, buf) => { (req as Request).rawBody = buf; } }));
   app.use((req, res, next) => {
-    req.db = db; req.sysDb = db; req.mailer = mailer;
+    req.db = db; req.sysDb = db; req.mailer = mailer; req.aws = aws;
     // "close" also fires when the client disconnects mid-request: the final release waits for any query or transaction
     // still running, then returns the connection, and refuses further use by the abandoned handler
     res.on("close", () => { void req.db.release(true).catch(() => {}); });
     next();
   });
 
-  app.use("/api", healthRouter, authRouter, scansRouter, findingsRouter, teamRouter);
+  app.use("/api", healthRouter, authRouter, scansRouter, findingsRouter, teamRouter, cloudRouter);
   app.use("/api", (_req, _res, next) => next(new HttpError(404, "not_found", "Unknown endpoint")));
 
   app.use((err: any, req: Request, res: Response, _next: NextFunction) => {

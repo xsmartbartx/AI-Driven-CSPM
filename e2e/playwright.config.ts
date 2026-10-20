@@ -13,7 +13,7 @@ export default defineConfig({
   projects: [{ name: "desktop", use: { viewport: { width: 1280, height: 800 } }, grepInvert: /@mobile/ }, { name: "mobile", use: { viewport: { width: 390, height: 800 } }, grep: /@mobile/ }],
   webServer: [
     {
-      command: "npx tsx src/index.ts", cwd: "../artifacts/api-server", url: `http://localhost:${API}/api/healthz`, reuseExistingServer: false, timeout: 60_000,
+      command: "npx tsx test/support/e2e-server.ts", cwd: "../artifacts/api-server", url: `http://localhost:${API}/api/healthz`, reuseExistingServer: false, timeout: 60_000,
       env: { PORT: String(API), DATA_DIR: ":memory:", NODE_ENV: "development", RATE_LIMIT_DISABLED: "1", JWT_SECRET: "e2e-secret", SSO_SECRET: "e2e-sso-secret-with-at-least-32-characters",
         APP_ORIGINS: `http://localhost:${APP},http://localhost:${SITE}`, APP_URL: `http://localhost:${APP}` },
     },
