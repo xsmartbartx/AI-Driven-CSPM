@@ -18,6 +18,7 @@ Not built: notification emails (finding digests, quota warnings), marketing mail
 4. Add a DMARC record if you have none: `_dmarc.mail.cspm.onenexora.com TXT "v=DMARC1; p=none; rua=mailto:<you>@onenexora.com"`. Tighten `p=none` to `quarantine` once the reports are clean.
 5. **API Keys → Create**, permission **Sending access**, restricted to that domain. Copy it once.
 6. Set on the API host (never in the repo): `RESEND_API_KEY=<the key>` and `MAIL_FROM=NEXORA CSPM <no-reply@mail.cspm.onenexora.com>`. In production the API refuses to start with a key but no `MAIL_FROM`.
+6b. Run the check from your machine (it never shows the key): `RESEND_API_KEY=... MAIL_FROM="..." node deploy/check-email.mjs you@example.com`. It reports whether the domain is verified (and which DNS records are still pending), then sends one test email.
 7. Test: sign up with an address you own, check the confirmation mail and that it is not in spam; use "Forgot your password?"; invite a second address of yours.
 8. Check mail-tester.com or Gmail "Show original" for SPF/DKIM/DMARC = pass.
 

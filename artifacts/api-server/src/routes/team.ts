@@ -139,7 +139,7 @@ r.post("/billing/portal", requireRole("owner"), async (req, res) => {
   const cust = (await req.db.query("select stripe_customer_id from organizations where id = $1", [req.auth!.orgId])).rows[0]?.stripe_customer_id;
   if (!cust) throw bad("This organization has no subscription to manage", "no_subscription");
   await req.db.release();
-  const s = await fetch("https://api.stripe.com/v1/billing_portal/sessions", { method: "POST", headers: { authorization: `Bearer ${config.stripeSecret}`, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ customer: cust, return_url: `${config.appUrl}/usage` }), signal: AbortSignal.timeout(15000) });
+  const s = await fetch("https://api.stripe.com/v1/billing_portal/sessions", { method: "POST", headers: { authorization: `Bearer ${config.stripeSecret}`, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ customer: cust, return_url: `${config.appUrl}/usage`, ...(config.stripePortalConfig ? { configuration: config.stripePortalConfig } : {}) }), signal: AbortSignal.timeout(15000) });
   const j: any = await s.json();
   if (!s.ok || !j.url) throw new HttpError(502, "billing_error", "Could not open the billing portal");
   res.json({ url: j.url });
