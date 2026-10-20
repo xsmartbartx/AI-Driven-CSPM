@@ -29,6 +29,8 @@ export const config = {
   trustProxy: process.env["TRUST_PROXY"] === "1",
   stripeSecret: process.env["STRIPE_SECRET_KEY"] ?? "",
   stripeWebhookSecret: process.env["STRIPE_WEBHOOK_SECRET"] ?? "",
+  /** Optional: the portal configuration created by deploy/stripe-test-setup.mjs. Unset = Stripe's default configuration. */
+  stripePortalConfig: process.env["STRIPE_PORTAL_CONFIG"] ?? "",
   stripeStarterPrice: process.env["STRIPE_PRICE_STARTER"] ?? "",
   /** Resend (https://resend.com). Without a key: dev logs emails to the console, production sends nothing. */
   /** Database-level tenant isolation (row level security). On unless RLS_ENFORCE=0. */

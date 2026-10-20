@@ -41,18 +41,29 @@ try {
   const hooks = (await call("GET", "/v1/webhook_endpoints?limit=100")).data;
   const existing = hooks.find((h) => h.url === webhookUrl);
   let secret = null;
-  if (existing) console.log(`  webhook endpoint exists: ${existing.id} (its signing secret is only shown when it is created; copy it from the dashboard, or delete this endpoint and run again)`);
-  else { console.log("  creating webhook endpoint"); const h = await call("POST", "/v1/webhook_endpoints", { url: webhookUrl, enabled_events: EVENTS, description: "NEXORA CSPM" }); secret = h.secret; }
+  let portalEnv = "";
+  if (existing) {
+    console.log(`  webhook endpoint exists: ${existing.id} (its signing secret is only shown when it is created; copy it from the dashboard, or delete this endpoint and run again)`);
+    if (existing.status === "disabled") { console.log("  that endpoint is DISABLED, so Stripe would send nothing: enabling it"); await call("POST", `/v1/webhook_endpoints/${existing.id}`, { disabled: false }); }
+  } else {
+    console.log("  creating webhook endpoint");
+    const h = await call("POST", "/v1/webhook_endpoints", { url: webhookUrl, enabled_events: EVENTS, description: "NEXORA CSPM" });
+    secret = h.secret;
+  }
   if (existing) { const missing = EVENTS.filter((e) => !existing.enabled_events.includes(e) && !existing.enabled_events.includes("*")); if (missing.length) console.log(`  WARNING: that endpoint is missing events: ${missing.join(", ")}. Add them in the dashboard.`); }
 
-  const cfgs = (await call("GET", "/v1/billing_portal/configurations?active=true&limit=10")).data;
-  if (cfgs.some((c) => c.is_default && c.features?.subscription_cancel?.enabled)) console.log("  customer portal: default configuration already allows cancelling");
+  // The API opens portal sessions with STRIPE_PORTAL_CONFIG when it is set, otherwise with Stripe's default configuration.
+  const cfgs = (await call("GET", "/v1/billing_portal/configurations?active=true&limit=100")).data;
+  let portal = cfgs.find((c) => c.is_default && c.features?.subscription_cancel?.enabled);
+  if (portal) console.log("  customer portal: the default configuration already allows cancelling; no STRIPE_PORTAL_CONFIG needed");
   else {
-    console.log("  creating customer portal configuration (cancel at period end, payment method, invoices)");
-    await call("POST", "/v1/billing_portal/configurations", { business_profile: { headline: "Manage your NEXORA CSPM subscription" }, features: { subscription_cancel: { enabled: true, mode: "at_period_end" }, payment_method_update: { enabled: true }, invoice_history: { enabled: true } } });
+    portal = cfgs.find((c) => c.metadata?.app === APP && c.features?.subscription_cancel?.enabled);
+    console.log(portal ? `  customer portal configuration exists: ${portal.id}` : "  creating customer portal configuration (cancel at period end, payment method, invoices)");
+    portal ??= await call("POST", "/v1/billing_portal/configurations", { metadata: { app: APP }, business_profile: { headline: "Manage your NEXORA CSPM subscription" }, features: { subscription_cancel: { enabled: true, mode: "at_period_end" }, payment_method_update: { enabled: true }, invoice_history: { enabled: true } } });
+    portalEnv = `\nSTRIPE_PORTAL_CONFIG=${portal.id}`;
   }
 
   console.log("\nSet these on the API (test mode):\n");
-  console.log(`STRIPE_SECRET_KEY=<your sk_test_ key>\nSTRIPE_PRICE_STARTER=${price.id}\nSTRIPE_WEBHOOK_SECRET=${secret ?? "<copy from the dashboard: Developers > Webhooks > your endpoint > Signing secret>"}`);
+  console.log(`STRIPE_SECRET_KEY=<your sk_test_ key>\nSTRIPE_PRICE_STARTER=${price.id}\nSTRIPE_WEBHOOK_SECRET=${secret ?? "<copy from the dashboard: Developers > Webhooks > your endpoint > Signing secret>"}${portalEnv}`);
   console.log("\nThen follow the test-card steps in replica/stripe-setup.md.");
 } catch (e) { console.error(`\n${e.message}`); process.exit(1); }

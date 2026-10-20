@@ -21,12 +21,12 @@ Use a fresh account in the app on the Free plan.
 | --- | --- | --- |
 | 1 | Usage & plan → Upgrade | redirect to Stripe Checkout for $19/month |
 | 2 | pay with `4242 4242 4242 4242`, any future date, any CVC | back on the app; within seconds the plan shows **Starter** and the scan limit 75 |
-| 3 | Stripe dashboard → webhook endpoint → recent deliveries | all 2xx; none retried |
-| 4 | Usage & plan → Manage or cancel subscription | portal opens; cancel at period end offered |
-| 5 | in the dashboard cancel the subscription immediately | plan returns to **Free** within seconds |
-| 6 | upgrade again with the decline card `4000 0000 0000 0002` | checkout shows the decline; plan stays Free |
-| 7 | resend one delivery from the dashboard | API answers `duplicate`; nothing changes |
-| 8 | Upgrade while already on Starter | the app refuses (409) and points to the portal |
+| 3 | Upgrade again while already on Starter | the app refuses (409) and points to the portal |
+| 4 | Stripe dashboard → webhook endpoint → recent deliveries | all 2xx; none retried |
+| 5 | resend one delivery from the dashboard | API answers `duplicate`; nothing changes |
+| 6 | Usage & plan → Manage or cancel subscription | portal opens; cancel at period end offered |
+| 7 | in the dashboard cancel the subscription immediately | plan returns to **Free** within seconds |
+| 8 | upgrade again with the decline card `4000 0000 0000 0002` | checkout shows the decline; plan stays Free |
 Also check the API log has no stack traces, and that `audit` shows `billing.checkout_started`.
 
 ## 4. Live mode (only after step 3 passes)

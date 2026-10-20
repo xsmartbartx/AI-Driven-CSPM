@@ -18,9 +18,10 @@ test("token is HS256-signed, short-lived, one-time and carries the user", () => 
   assert.notEqual(claims(createCspmToken({ secret, user })).jti, claims(createCspmToken({ secret, user })).jti); // fresh jti every time
 });
 
-test("lifetime is clamped to what the CSPM API accepts (10 seconds to 10 minutes)", () => {
-  assert.equal(claims(createCspmToken({ secret, user, ttlSeconds: 86400 })).exp - claims(createCspmToken({ secret, user, ttlSeconds: 86400 })).iat, 600);
-  const c = claims(createCspmToken({ secret, user, ttlSeconds: 1 })); assert.equal(c.exp - c.iat, 10);
+test("lifetime is clamped to 10 seconds..9 minutes, leaving a minute of clock skew below the API's 10-minute limit", () => {
+  const long = claims(createCspmToken({ secret, user, ttlSeconds: 86400 })); // one token: comparing two could straddle a second boundary
+  assert.equal(long.exp - long.iat, 540);
+  const short = claims(createCspmToken({ secret, user, ttlSeconds: 1 })); assert.equal(short.exp - short.iat, 10);
 });
 
 test("refuses weak secrets and bad input", () => {

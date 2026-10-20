@@ -36,7 +36,7 @@ Then add an **"Open CSPM"** button in the console (and on the CSPM product page 
 | first user of an organization | becomes the CSPM **owner** |
 | later users of the same organization | join with the `role` sent (`viewer` default, `analyst`, `admin`); `owner` is never accepted |
 | `jti` | one-time: a link used twice is refused |
-| `exp` | at most 10 minutes ahead, default 2 minutes |
+| `exp` | the API refuses links expiring more than 10 minutes ahead of its own clock; the helper caps them at 9 minutes (default 2) to leave room for clock differences. Keep the console server's clock synced (NTP). |
 Then it sets its session cookie and redirects to the dashboard. Role changes made in CSPM's Team page are not overwritten on later sign-ins (the role claim only applies when a person first joins).
 
 ## 4. Check it

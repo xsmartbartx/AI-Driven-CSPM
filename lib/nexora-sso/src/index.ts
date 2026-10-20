@@ -35,7 +35,9 @@ export function createCspmToken(opts: { secret: string; user: CspmUser; ttlSecon
   const { secret, user } = opts;
   if (!secret || secret.length < 32) throw new Error("secret must be at least 32 characters");
   if (!user.id || !user.orgId || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(user.email)) throw new Error("user needs id, orgId and a valid email");
-  const ttl = Math.min(Math.max(opts.ttlSeconds ?? 120, 10), 600); // CSPM rejects tokens valid for more than 10 minutes
+  // The CSPM API rejects tokens that expire more than 600 seconds after ITS clock. Stay well below that so a Nexora
+  // server whose clock runs up to a minute ahead still produces accepted links.
+  const ttl = Math.min(Math.max(opts.ttlSeconds ?? 120, 10), 540);
   const now = Math.floor((opts.now?.() ?? Date.now()) / 1000);
   const head = b64u({ alg: "HS256", typ: "JWT" });
   const body = b64u({

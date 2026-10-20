@@ -9,6 +9,7 @@ process.env["STRIPE_WEBHOOK_SECRET"] = "whsec_test";
 process.env["APP_ORIGINS"] = "http://localhost:5174";
 process.env["STRIPE_SECRET_KEY"] = "sk_test_dummy_never_called";
 process.env["STRIPE_PRICE_STARTER"] = "price_dummy";
+process.env["STRIPE_PORTAL_CONFIG"] = "bpc_test_config";
 process.env["NODE_ENV"] = "test";
 
 const { openDb } = await import("@workspace/db");
@@ -425,6 +426,22 @@ test("Stripe: subscription lifecycle events; a failed handler is not marked seen
   const bad = await send({ id: evId, type: "checkout.session.completed", data: { object: { client_reference_id: "not-a-uuid", customer: `cus_x_${RUN}` } } });
   assert.equal(bad.status, 500);
   assert.equal((await db.query("select 1 from stripe_events where id = $1", [evId])).rows.length, 0);
+});
+
+test("billing portal sessions use the configured portal configuration (the one the setup script created)", async () => {
+  const { c, me } = await signup();
+  await db.query("update organizations set plan = 'starter', stripe_customer_id = $2 where id = $1", [me.org.id, `cus_portal_${RUN}`]);
+  const real = globalThis.fetch; let seen: { url: string; body: URLSearchParams } | null = null;
+  globalThis.fetch = (async (url: any, init: any) => {
+    if (String(url).startsWith("https://api.stripe.com/")) { seen = { url: String(url), body: new URLSearchParams(init.body) }; return new Response(JSON.stringify({ url: "https://billing.example.test/session" }), { status: 200 }); }
+    return real(url, init);
+  }) as typeof fetch;
+  try {
+    const r = await c.post("/billing/portal");
+    assert.equal(r.status, 200, r.text); assert.equal(r.json.url, "https://billing.example.test/session");
+  } finally { globalThis.fetch = real; }
+  assert.equal(seen!.url, "https://api.stripe.com/v1/billing_portal/sessions");
+  assert.equal(seen!.body.get("configuration"), "bpc_test_config"); assert.equal(seen!.body.get("customer"), `cus_portal_${RUN}`);
 });
 
 test("billing: no portal without a subscription; second checkout is refused for a paid org", async () => {
