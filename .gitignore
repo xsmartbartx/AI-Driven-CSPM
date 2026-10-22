@@ -46,3 +46,4 @@ Thumbs.db
 replica/screens/
 e2e/test-results
 e2e/playwright-report
+deploy/oci/local-test.vars
