@@ -36,3 +36,9 @@ export const verifyEmail = (to: string, token: string): Mail =>
     ["Confirm this email address so we can reach you about your account.", "The link expires in 24 hours."],
     { label: "Confirm email", url: `${base()}/verify-email/${token}` },
     "If you did not create a NEXORA CSPM account, ignore this email.");
+
+export const scheduledScanStoppedEmail = (to: string, orgName: string, account: string, reason: string): Mail =>
+  layout(to, `Automatic AWS scans stopped for ${account}`,
+    [`NEXORA stopped the automatic scans of AWS account ${account} for ${orgName}: ${reason}`, "Nothing else changed: your existing findings are still there, and you can still scan by hand."],
+    { label: "Open cloud accounts", url: `${base()}/integrations` },
+    "To start automatic scans again, fix the cause, press Verify connection, then choose Daily or Weekly.");

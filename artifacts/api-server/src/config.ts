@@ -39,6 +39,9 @@ export const config = {
   poolMax: Math.max(2, Number(process.env["DB_POOL_MAX"] ?? 10) || 10),
   /** NEXORA's own AWS account id (12 digits). Set it to enable AWS connections; the process also needs AWS credentials that may call sts:AssumeRole. */
   awsAccountId: process.env["CSPM_AWS_ACCOUNT_ID"] ?? "",
+  /** Automatic scans of connected AWS accounts. On whenever the AWS connector is enabled, unless SCHEDULER=0 (e.g. on extra instances). */
+  scheduler: process.env["SCHEDULER"] !== "0" && !!process.env["CSPM_AWS_ACCOUNT_ID"],
+  schedulerTickSeconds: Math.max(10, Number(process.env["SCHEDULER_TICK_SECONDS"] ?? 60) || 60),
   resendKey: process.env["RESEND_API_KEY"] ?? "",
   mailFrom: process.env["MAIL_FROM"] ?? "NEXORA CSPM <no-reply@cspm.onenexora.com>",
   anthropicKey: process.env["ANTHROPIC_API_KEY"] ?? "",

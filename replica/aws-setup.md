@@ -36,13 +36,23 @@ Environment: a tag `environment` (or `env`) with prod/staging/dev values sets th
 - Viewers see connections but not the External ID, nor any action buttons; analysts can scan; admins connect, verify and disconnect. Everything is audited without ARNs or External IDs.
 - Row level security applies (tenant role), and the AWS calls run with no database connection held.
 
+## Scheduled rescans
+An admin can switch a verified connection to **Daily** or **Weekly** on the Cloud accounts page. The API process checks every minute (`SCHEDULER_TICK_SECONDS`, default 60; `SCHEDULER=0` turns it off on an instance) and scans the accounts that are due, three at a time, one after another.
+- **Same pipeline as a manual scan** (one shared service): same rules, same complete/incomplete handling, same quota. A scheduled scan counts against the plan's monthly scans, so **Daily needs a plan with at least 31 scans** (Free has 10: it will run until the allowance is used, then pause and say so; it resumes when the month resets). Scheduled scans have no user: they appear in scan history as account scans with no author, and in the audit log as `cloud.scan.scheduled`.
+- **Several instances are safe**: due accounts are claimed with `FOR UPDATE SKIP LOCKED`, and every scan takes a per-account lease in the database (`scan_started_at`, abandoned after 20 minutes if a process dies), so an account is never scanned twice at once, by the scheduler or by a person.
+- **Start times**: turning a schedule on starts the first scan within 1–10 minutes, or one full interval after the last scan if there was one; every run adds up to 10 minutes of random jitter so accounts do not all fire together.
+- **Failures**: a scan that fails for a reason that may fix itself (NEXORA's own AWS credentials, network, throttling, an empty account) is retried after 1 h, 2 h, 4 h, 8 h, ... (never longer than the interval); a success resets the count. After **5 failures in a row** the schedule switches off, the owners and admins get one email, and the audit log records `cloud.schedule_disabled`. If the customer's role stops working (assume-role denied, wrong account) the schedule stops **at once**, the connection is marked "Needs attention" and the admins are emailed. Quota exhaustion and "a scan is already running" are not failures: they retry in 6 hours and 15 minutes.
+- Everything a scheduled scan does runs under the organization's row level security.
+- **Not built:** per-connection times of day, notifications about new findings (only the stop emails exist), a schedule per region group, and a scan history filter for scheduled vs manual.
+
 ## Not built
-Scheduled or automatic rescans (scans are manual), other regions in one connection, Azure/GCP/Kubernetes, inline and AWS-managed IAM policies, trust-policy checks for roles, S3 object-level checks, resource-count pagination beyond 500, and a webhook for EventBridge changes.
+Other regions in one connection, Azure/GCP/Kubernetes, inline and AWS-managed IAM policies, trust-policy checks for roles, S3 object-level checks, resource-count pagination beyond 500, and a webhook for EventBridge changes.
 
 ## First real run (you, with a sandbox AWS account, about 30 minutes)
 1. Operator setup above; set `CSPM_AWS_ACCOUNT_ID`; restart the API.
 2. In a **separate sandbox AWS account**, create: one public-read bucket (or a public ACL), one security group open to `0.0.0.0/0` on port 22, one customer-managed policy with `Action: *` / `Resource: *` attached to a test role, one public RDS instance if you want (costs money; skip it otherwise).
 3. Connect that account, deploy the template, Verify, Scan. Expect: S3 public-read, SG sensitive-port, IAM admin access findings; Notes listing the IAM scope limits.
 4. Negative checks: change the role's ExternalId condition → Verify must fail with the trust-policy message; remove `ec2:DescribeSecurityGroups` from the role → the scan must report "EC2 security groups: access denied", finish as incomplete and **not** close any findings; delete the bucket and rescan completely → its finding becomes fixed.
-5. Delete the stack in the sandbox account and press Disconnect.
+5. Scheduled scans: set the connection to Daily, then in the database set `next_run_at = now()` for it (or wait) and watch `docker compose logs api` for "scheduled scan finished"; check scan history shows an account scan with no author. Break the role (change the External ID condition) and confirm the schedule stops with the admin email.
+6. Delete the stack in the sandbox account and press Disconnect.
 Report anything that differs; the most likely surprises are AWS API shapes for S3 region redirects and the number of API calls on accounts with hundreds of buckets.

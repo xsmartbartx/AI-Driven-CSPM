@@ -4,7 +4,7 @@ import { api, ApiError, useApi } from "../api";
 import { useMe } from "../App";
 import { Dialog, Empty, ErrorBox, fmtTime, Skeleton } from "../ui";
 
-interface Conn { id: string; accountId: string; region: string; roleArn: string; status: "pending" | "connected" | "error"; lastSyncAt: string | null; lastError: string | null; verifiedAt: string | null; lastScanId: string | null; externalId?: string }
+interface Conn { id: string; accountId: string; region: string; roleArn: string; status: "pending" | "connected" | "error"; lastSyncAt: string | null; lastError: string | null; verifiedAt: string | null; lastScanId: string | null; externalId?: string; schedule: "off" | "daily" | "weekly"; nextRunAt: string | null; failureCount: number; lastScheduledAt: string | null }
 interface Setup { principalAccountId: string; externalId: string; roleArn: string; template: string }
 
 const STATUS: Record<Conn["status"], { label: string; cls: string }> = { pending: { label: "Not verified", cls: "" }, connected: { label: "Connected", cls: "ok" }, error: { label: "Needs attention", cls: "critical" } };
@@ -26,6 +26,11 @@ export function Cloud() {
       else { const r = await api<any>("POST", `/cloud-accounts/${c.id}/scan`); setResult({ id: c.id, scanId: r.id, findingCount: r.findingCount, notes: r.notes ?? [], complete: r.complete }); }
     } catch (e) { toast((e as ApiError).message); }
     finally { setBusy(""); reload(); }
+  }
+  async function setSchedule(c: Conn, schedule: string) {
+    try { await api("PATCH", `/cloud-accounts/${c.id}`, { schedule }); toast(schedule === "off" ? "Automatic scans are off" : `Automatic scans are on (${schedule})`); }
+    catch (e) { toast((e as ApiError).message); }
+    finally { reload(); }
   }
   async function showSetup(c: Conn) {
     try { setSetup(await api<Setup>("GET", `/cloud-accounts/${c.id}/setup`)); } catch (e) { toast((e as ApiError).message); }
@@ -80,6 +85,20 @@ export function Cloud() {
                   {can("admin") && <button className="btn danger" onClick={() => remove(c)} disabled={!!busy}>Disconnect</button>}
                 </div>
               </div>
+              {c.status === "connected" && (
+                <div className="row" style={{ marginTop: 12 }}>
+                  {can("admin") ? (
+                    <label className="row" style={{ gap: 8 }}>
+                      <span style={{ fontWeight: 600 }}>Automatic scans</span>
+                      <select className="select" style={{ width: 130 }} value={c.schedule} onChange={(e) => setSchedule(c, e.target.value)} aria-label={`Automatic scans for ${c.accountId} in ${c.region}`}>
+                        <option value="off">Off</option><option value="daily">Daily</option><option value="weekly">Weekly</option>
+                      </select>
+                    </label>
+                  ) : <span><strong>Automatic scans:</strong> {c.schedule === "off" ? "off" : c.schedule}</span>}
+                  {c.schedule !== "off" && c.nextRunAt && <span className="muted">Next scan around {fmtTime(c.nextRunAt)}</span>}
+                  {c.schedule !== "off" && c.failureCount > 0 && <span className="err">Last {c.failureCount} automatic scan{c.failureCount === 1 ? "" : "s"} failed; retrying with a delay.</span>}
+                </div>
+              )}
               {c.lastError && <p className="err" role="alert" style={{ marginTop: 12 }}>{c.lastError}</p>}
               <p className="muted" style={{ marginTop: 8, overflowWrap: "anywhere" }}>Role: {c.roleArn}</p>
             </section>
@@ -91,6 +110,7 @@ export function Cloud() {
         <h2 className="h2" id="what">What NEXORA reads</h2>
         <p className="muted">Only names, settings and policies; never your data. The role can list and describe these and nothing else:</p>
         <p style={{ marginTop: 8 }}>{(data?.readOnlyActions ?? []).map((a: string) => <code key={a} style={{ marginRight: 6, display: "inline-block" }}>{a}</code>)}</p>
+        <p className="muted" style={{ marginTop: 8 }}>Automatic scans (daily or weekly) use the same monthly scan allowance as scans you start yourself, so a daily schedule needs a plan with at least 31 scans. If your allowance runs out, automatic scans pause until it resets. After five failures in a row they switch off and the owners and admins get an email.</p>
         <p className="muted" style={{ marginTop: 8 }}>Checks cover S3 buckets, EC2 security groups, customer-managed IAM policies that are in use, and RDS databases in the region you choose. Add one connection per region.</p>
       </section>
 
