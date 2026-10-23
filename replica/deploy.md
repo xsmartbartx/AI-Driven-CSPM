@@ -39,6 +39,9 @@ Migration `0003_rls` makes Postgres itself refuse cross-tenant access, on top of
 ## AWS connector
 Off by default. To enable it set `CSPM_AWS_ACCOUNT_ID` and give the API process AWS credentials that may `sts:AssumeRole`; full steps, the security model and a first-run test plan with a sandbox account are in `replica/aws-setup.md`. It has never run against real AWS, so test it with a sandbox account before offering it to customers. The production bundle includes the AWS SDK (about 6 MB).
 
+## Deploying on one Oracle Cloud (OCI) VM
+A ready kit (`deploy/oci/`: Dockerfile for x86 and ARM, Caddy with automatic HTTPS, Postgres, backup and restore scripts, a bootstrap script) and a step-by-step guide are in `replica/oci-deploy.md`. It was tested on a laptop only, never on OCI.
+
 ## Target layout
 | what | host name | served by |
 | --- | --- | --- |

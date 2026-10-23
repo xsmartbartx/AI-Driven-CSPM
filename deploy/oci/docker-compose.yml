@@ -1,0 +1,78 @@
+# Single-VM deployment: Postgres + API + Caddy (TLS, static sites). From this directory:  docker compose up -d --build
+# Needs a .env next to this file (copy .env.example). Nothing is exposed except ports 80 and 443.
+name: nexora-cspm
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cspm
+      # use only letters and digits (openssl rand -hex 24): the same value is placed into the DATABASE_URL below, so characters like / + @ : would break it
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: cspm
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cspm -d cspm"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [internal]
+
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/oci/Dockerfile
+      target: api
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      NODE_ENV: production
+      PORT: "8080"
+      TRUST_PROXY: "1"
+      # the database role "cspm" owns the tables (it runs the migrations) and may SET ROLE cspm_app (row level security)
+      DATABASE_URL: postgres://cspm:${POSTGRES_PASSWORD}@db:5432/cspm
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      APP_ORIGINS: https://${SITE_HOST},https://${APP_HOST}
+      APP_URL: https://${APP_HOST}
+      SSO_SECRET: ${SSO_SECRET:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_STARTER: ${STRIPE_PRICE_STARTER:-}
+      STRIPE_PORTAL_CONFIG: ${STRIPE_PORTAL_CONFIG:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CSPM_AWS_ACCOUNT_ID: ${CSPM_AWS_ACCOUNT_ID:-}
+      DB_POOL_MAX: ${DB_POOL_MAX:-10}
+    networks: [internal]
+
+  web:
+    build:
+      context: ../..
+      dockerfile: deploy/oci/Dockerfile
+      target: web
+      args: { VITE_API_URL: "https://${API_HOST}", VITE_APP_URL: "https://${APP_HOST}" }
+    restart: unless-stopped
+    depends_on: [api]
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    environment:
+      SITE_HOST: ${SITE_HOST}
+      APP_HOST: ${APP_HOST}
+      API_HOST: ${API_HOST}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+      CADDY_GLOBAL_OPTIONS: ${CADDY_GLOBAL_OPTIONS:-}
+    volumes:
+      - caddy_data:/data        # certificates: keep this volume or you will re-request them (Let's Encrypt rate limits)
+      - caddy_config:/config
+    networks: [internal]
+
+networks:
+  internal: {}
+volumes:
+  pgdata: {}
+  caddy_data: {}
+  caddy_config: {}

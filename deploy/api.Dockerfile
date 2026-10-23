@@ -1,3 +1,4 @@
+# Superseded for single-VM deployments by deploy/oci/Dockerfile (x86 and ARM). Kept for hosts that run only the API.
 # Build from the repo root:  docker build --platform linux/amd64 -f deploy/api.Dockerfile -t nexora-cspm-api .
 FROM node:22-alpine AS build
 WORKDIR /app
