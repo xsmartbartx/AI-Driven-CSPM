@@ -43,7 +43,7 @@ OCI Ubuntu images block everything but SSH in `iptables`, **in addition to** the
 cd ~/AI-Driven-CSPM/deploy/oci
 cp .env.example .env && chmod 600 .env
 openssl rand -base64 36    # paste as JWT_SECRET
-openssl rand -base64 24    # paste as POSTGRES_PASSWORD
+openssl rand -hex 24       # paste as POSTGRES_PASSWORD (hex only: it is placed into a URL, so / + @ : would break it)
 nano .env                  # set SITE_HOST / APP_HOST / API_HOST, ACME_EMAIL, the two secrets
 ```
 Leave the optional blocks empty for now. Add each one when you have set that service up (email: `replica/email-setup.md`, Stripe: `replica/stripe-setup.md`, SSO: `replica/nexora-sso.md`, AWS: `replica/aws-setup.md`), then `docker compose up -d` again. **Never commit `.env`**, and do not paste its contents into chats or tickets.
@@ -66,7 +66,7 @@ cd ~/AI-Driven-CSPM && git pull && cd deploy/oci
 ./backup.sh                       # always before a release that adds a migration
 docker compose up -d --build
 ```
-Migrations run when the API starts. If one fails the API refuses to start and keeps the old container only if you did not stop it: check `docker compose logs api`.
+Migrations run when the API starts, each in its own transaction. `up --build` replaces the running API container, so if a migration fails the **new** container crash-loops and the old one is already gone: check `docker compose logs api`, then go back with the rollback steps below. The failed migration rolled itself back; migrations that ran before it in the same release stay applied, which is why you took a backup first.
 
 **Backups** (database only; secrets are in `.env`, keep a copy somewhere safe and separate)
 ```bash
@@ -78,7 +78,7 @@ It keeps the newest 14 and refuses to keep an empty dump. **Copy backups off the
 **Logs:** `docker compose logs -f api` (JSON lines; no tokens, passwords or request bodies are logged). **Restart:** `docker compose restart api`. **Stop everything:** `docker compose down` (data stays in the volumes; `down -v` deletes it).
 **Disk:** `docker system df`; prune old images after updates with `docker image prune -f`.
 
-**Rollback:** `git checkout <previous commit>` and `docker compose up -d --build`. A migration is forward-only: if a release added one, restore the backup taken before it as well.
+**Rollback:** `git checkout <previous commit>` and `docker compose up -d --build`. Migrations only go forward and are additive, so older code normally runs fine on the newer schema; if it does not, restore the backup taken before the release (`./restore.sh`, which takes a safety backup first and is all-or-nothing: a failed restore changes nothing and the site is started again).
 
 ## 7. Security notes
 - Postgres has no published port. The API and web containers talk to it over the private compose network.

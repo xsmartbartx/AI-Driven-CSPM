@@ -7,6 +7,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: cspm
+      # use only letters and digits (openssl rand -hex 24): the same value is placed into the DATABASE_URL below, so characters like / + @ : would break it
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: cspm
     volumes:
@@ -23,7 +24,6 @@ services:
       context: ../..
       dockerfile: deploy/oci/Dockerfile
       target: api
-      args: { VITE_API_URL: "https://${API_HOST}", VITE_APP_URL: "https://${APP_HOST}" }
     restart: unless-stopped
     depends_on:
       db: { condition: service_healthy }
