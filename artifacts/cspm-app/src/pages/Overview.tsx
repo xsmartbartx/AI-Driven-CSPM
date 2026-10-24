@@ -5,7 +5,7 @@ import { useMe } from "../App";
 import { Empty, ErrorBox, Kpi, ScoreRing, Sev, Skeleton, Trend } from "../ui";
 
 const RANGES = [["30d", "30 days"], ["3m", "3 months"], ["6m", "6 months"]] as const;
-const TYPE_LABEL: Record<string, string> = { s3_bucket: "Storage buckets", security_group: "Security groups", iam_policy: "IAM policies", database: "Databases" };
+const TYPE_LABEL: Record<string, string> = { s3_bucket: "Storage buckets", security_group: "Security groups", iam_policy: "IAM policies", database: "Databases", ec2_instance: "Servers", iam_role: "IAM roles" };
 
 export function Overview() {
   const { can } = useMe();

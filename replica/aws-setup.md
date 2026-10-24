@@ -27,6 +27,9 @@ Built and tested with a fake AWS and a mock STS server (real SDK request path), 
 | RDS | DB instances in the chosen region | |
 Environment: a tag `environment` (or `env`) with prod/staging/dev values sets the asset's environment, which weights the risk score. One connection per account **and region**; S3 and IAM are global but are read on each connection, so use one connection per account unless you need other regions.
 
+## Attack paths (relationship data)
+The role template now also allows `ec2:DescribeInstances`, `iam:ListInstanceProfiles`, `iam:ListAttachedRolePolicies`, `iam:ListRolePolicies` and `iam:GetRolePolicy` (all read-only; still no data, secrets or logs). They read which servers exist, which role each runs as, and what that role is allowed to do, and only for roles servers actually use. **Customers who deployed the earlier template must redeploy it to get attack paths.** Without the new permissions nothing breaks: the scan stays complete for everything it checks, says "EC2 instances: access denied ... Redeploy the setup template" in its notes, and the Attack paths page explains what is missing. See `replica/attack-paths.md`.
+
 ## Safety rules enforced in code (and tested)
 - External ID per connection, random, never reused; the setup template and the permission list come from one source.
 - The role's account must match the account entered; the role ARN is built from the account id and a validated role name (no free-form ARNs).

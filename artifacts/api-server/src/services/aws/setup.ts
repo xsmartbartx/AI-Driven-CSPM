@@ -8,6 +8,8 @@ export const READ_ONLY_ACTIONS = [
   "ec2:DescribeSecurityGroups",
   "iam:ListPolicies", "iam:GetPolicyVersion",
   "rds:DescribeDBInstances",
+  // relationships for attack paths: which instances exist, which role each runs as, and what that role may do
+  "ec2:DescribeInstances", "iam:ListInstanceProfiles", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies", "iam:GetRolePolicy",
 ] as const;
 
 export const DEFAULT_ROLE_NAME = "NexoraCSPMReadOnly";
