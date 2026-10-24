@@ -298,3 +298,9 @@ alter table cloud_accounts add column if not exists failure_count int not null d
 alter table cloud_accounts add column if not exists last_scheduled_at timestamptz;             -- last successful scheduled scan
 alter table cloud_accounts add column if not exists scan_started_at timestamptz;
 create index if not exists cloud_accounts_due_idx on cloud_accounts (next_run_at) where schedule <> 'off';
+
+-- ===== 0006_asset_last_scan =====
+-- Which scan last saw an asset. Attack paths are built only from what the latest scan of an account actually found, so a
+-- resource that disappeared (or could not be read this time) stops appearing in paths at once, without any time window.
+alter table assets add column if not exists last_scan_id uuid references scans(id) on delete set null;
+create index if not exists assets_last_scan_idx on assets (last_scan_id);

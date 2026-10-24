@@ -139,6 +139,9 @@ export const RULES: Rule[] = [
 ];
 
 export const RESOURCE_TYPES = [...new Set(RULES.map((r) => r.resourceType))];
+/** Accepted in a scan and stored, but have no rules of their own: they only describe relationships for attack paths. */
+export const RELATIONAL_TYPES = ["ec2_instance", "iam_role"];
+export * from "./paths";
 
 export function severityOf(score: number): Severity {
   return score >= 76 ? "critical" : score >= 51 ? "high" : score >= 21 ? "medium" : "low";
@@ -181,6 +184,7 @@ export function evaluate(resources: Resource[]): { findings: Finding[]; unknownT
   const findings: Finding[] = [];
   const unknown = new Set<string>();
   for (const r of resources) {
+    if (RELATIONAL_TYPES.includes(r.type)) continue;
     if (!RESOURCE_TYPES.includes(r.type)) { unknown.add(r.type); continue; }
     for (const rule of RULES) {
       if (rule.resourceType !== r.type) continue;
@@ -242,6 +246,16 @@ export function explain(f: Pick<Finding, "ruleId" | "title" | "resourceName" | "
     `Not checked: this scan sees only the config you provided, not live traffic, data contents or other resources.`,
   ].join("\n\n");
 }
+
+/** SAMPLE_CONFIG plus the relationships attack paths need: an internet-facing instance with an admin role and a database that trusts it. */
+export const SAMPLE_PATHS_CONFIG = () => ({
+  resources: [
+    ...SAMPLE_CONFIG.resources.map((r) => (r.name === "orders-db" ? { ...r, security_groups: ["db-sg"] } : r)),
+    { type: "ec2_instance", name: "web-1", environment: "production", public_ip: true, security_groups: ["web-sg"], role: "app-role" },
+    { type: "iam_role", name: "app-role", policies: ["payments-role"] },
+    { type: "security_group", name: "db-sg", environment: "production", ingress: [{ sourceGroup: "web-sg", port: 5432 }] },
+  ],
+});
 
 export const SAMPLE_CONFIG = {
   resources: [

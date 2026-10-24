@@ -3,7 +3,7 @@ import { Link, useSearch } from "wouter";
 import { useApi } from "../api";
 import { Empty, ErrorBox, fmtDate, Skeleton } from "../ui";
 
-const TYPE_LABEL: Record<string, string> = { s3_bucket: "Storage bucket", security_group: "Security group", iam_policy: "IAM policy", database: "Database" };
+const TYPE_LABEL: Record<string, string> = { s3_bucket: "Storage bucket", security_group: "Security group", iam_policy: "IAM policy", database: "Database", ec2_instance: "Server", iam_role: "IAM role" };
 
 export function Assets() {
   const type = new URLSearchParams(useSearch()).get("type") ?? "";

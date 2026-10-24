@@ -9,6 +9,7 @@ import { Assets, Compliance } from "./pages/Inventory";
 import { Audit, Settings, Team, Usage } from "./pages/Admin";
 import { Planned } from "./pages/Planned";
 import { Cloud } from "./pages/Cloud";
+import { AttackPaths } from "./pages/Paths";
 import { AuthPage, ForgotPasswordPage, InvitePage, ResetPasswordPage, VerifyEmailPage } from "./pages/Auth";
 
 export type Role = "owner" | "admin" | "analyst" | "viewer";
@@ -31,11 +32,11 @@ const NAV: { h?: string; to: string; label: string; icon: keyof typeof ICONS; mi
   { to: "/findings", label: "Findings", icon: "alert" },
   { to: "/assets", label: "Assets", icon: "box" },
   { to: "/compliance", label: "Compliance", icon: "check" },
+  { to: "/attack-paths", label: "Attack paths", icon: "path" },
   { h: "Scans", to: "/scans/new", label: "New scan", icon: "scan", min: "analyst" },
   { to: "/integrations", label: "Cloud accounts", icon: "plug" },
   { to: "/scans", label: "Scan history", icon: "history" },
-  { h: "Coming", to: "/planned/attack-paths", label: "Attack paths", icon: "path", soon: true },
-  { to: "/planned/ai", label: "AI Security Center", icon: "spark", soon: true },
+  { h: "Coming", to: "/planned/ai", label: "AI Security Center", icon: "spark", soon: true },
   { to: "/planned/remediation", label: "Remediation", icon: "wrench", soon: true },
   { h: "Organization", to: "/usage", label: "Usage & plan", icon: "card" },
   { to: "/team", label: "Team", icon: "users", min: "admin" },
@@ -137,6 +138,7 @@ export function App() {
                   <Route path="/assets" component={Assets} />
                   <Route path="/compliance" component={Compliance} />
                   <Route path="/integrations" component={Cloud} />
+                  <Route path="/attack-paths" component={AttackPaths} />
                   <Route path="/usage" component={Usage} />
                   <Route path="/team" component={Team} />
                   <Route path="/audit" component={Audit} />

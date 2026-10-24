@@ -30,6 +30,7 @@ Test mode only. No live keys, no third-party accounts created. Variables: see `.
 - **Stripe**: checkout, portal and four webhook events are coded and unit-tested with signed payloads, never run against Stripe. Needs your test-mode keys and a Starter price id.
 - **AWS connector**: built (`services/aws`, `routes/cloud.ts`, migration 0004): read-only role + per-connection External ID, 15-minute assumed credentials, S3/EC2 security groups/IAM customer policies/RDS, complete-vs-incomplete scans, safe error mapping; 14 API + 13 collector + 4 STS-mock tests and 4 browser tests, plus the production bundle run. **Never run against real AWS**; see `replica/aws-setup.md`.
 - **Scheduled AWS rescans**: built (`services/scheduler.ts`, `services/aws/scan.ts`, migration 0005). Daily/weekly per connection, claimed with `SKIP LOCKED` plus a per-account database lease, backoff then auto-disable with an admin email, quota-aware, shared scan pipeline. 13 scheduler tests, 3 API tests, 1 browser test. Never run against real AWS.
+- **Attack paths**: built (`lib/cspm-engine/src/paths.ts`, `routes/paths.ts`, migration 0006, Attack paths page). Computed on request from the latest scan's assets; nothing stored. See `replica/attack-paths.md`. Never run against real AWS.
 - **Other background jobs**: none. Nightly snapshot rollup is replaced by writing a snapshot on every scan.
 - **Backups**: depend on the Postgres host. Turn them on and verify (deploy checklist).
 - **Anthropic explanations**: coded with timeout and fallback, not run live.

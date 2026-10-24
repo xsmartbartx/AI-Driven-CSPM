@@ -62,16 +62,16 @@ export async function runScan(db: { tx: <T>(fn: (q: Queryable) => Promise<T>) =>
     const assetId = new Map<string, string>();
     for (const r of resources) {
       const { rows } = await q.query(
-        `insert into assets (org_id, provider, type, name, environment, criticality, owner, raw, account_id)
-         values ($1,'aws',$2,$3,$4,$5,$6,$7::jsonb,$8)
+        `insert into assets (org_id, provider, type, name, environment, criticality, owner, raw, account_id, last_scan_id)
+         values ($1,'aws',$2,$3,$4,$5,$6,$7::jsonb,$8,$9)
          on conflict (org_id, provider, type, name) do update
            set environment = excluded.environment, criticality = excluded.criticality, owner = excluded.owner,
-               raw = excluded.raw, account_id = coalesce(excluded.account_id, assets.account_id), last_seen_at = now(), updated_at = now()
+               raw = excluded.raw, account_id = coalesce(excluded.account_id, assets.account_id), last_scan_id = excluded.last_scan_id, last_seen_at = now(), updated_at = now()
          returning id`,
         [auth.orgId, r.type, r.name,
           ["production", "staging", "development"].includes(r.environment as string) ? r.environment : "production",
           Math.min(10, Math.max(1, Math.round(Number(r.criticality ?? defaultCriticality(r))) || 5)),
-          typeof r.owner === "string" ? r.owner.slice(0, 100) : null, JSON.stringify(r), opts.accountId ?? null]);
+          typeof r.owner === "string" ? r.owner.slice(0, 100) : null, JSON.stringify(r), opts.accountId ?? null, scanId]);
       assetId.set(`${r.type}/${r.name}`, rows[0].id);
     }
 

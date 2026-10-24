@@ -2,7 +2,6 @@ import { Link } from "wouter";
 import { Empty } from "../ui";
 
 const COPY: Record<string, { title: string; body: string }> = {
-  "attack-paths": { title: "Attack paths", body: "Chains such as internet → public server → over-privileged role → production database, shown as one risk instead of many alerts. This needs live cloud connections to know how resources relate, so it follows account connection." },
   ai: { title: "AI Security Center", body: "A daily brief and questions answered from your own findings. For now, open any finding and choose “Explain this finding”." },
   remediation: { title: "Remediation", body: "Generated Terraform fixes and pull requests for review. For now, every finding shows the manual fix." },
 };

@@ -321,6 +321,8 @@ test.describe("F09 team and roles, F10 settings", () => {
     await expect(v.getByText("You need analyst access to run scans")).toBeVisible();
     await v.goto("/findings");
     await expect(v.getByRole("row")).toHaveCount(8); // can read
+    await v.goto("/attack-paths");
+    await expect(v.getByRole("heading", { name: "Attack paths", level: 1 })).toBeVisible(); // readable by viewers
     await v.goto("/team");
     await expect(v.getByRole("alert")).toContainText("permission");
     // owner promotes to analyst; takes effect on the next request
@@ -367,9 +369,68 @@ test.describe("F09 team and roles, F10 settings", () => {
   });
   test("planned pages are honest about not existing yet", async ({ page }) => {
     await signUp(page);
-    await page.getByRole("link", { name: /Attack paths/ }).click();
+    await page.getByRole("link", { name: /AI Security Center/ }).click();
     await expect(page.getByText("Planned, not built")).toBeVisible();
     await a11y(page, "planned");
+  });
+});
+
+test.describe("F11 attack paths", () => {
+  test("F11-E1 without servers there is nothing to build paths from, and the page says what is needed", async ({ page }) => {
+    await signUp(page);
+    await page.getByRole("link", { name: "Attack paths" }).click();
+    await expect(page.getByRole("heading", { name: "Nothing to build paths from yet" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Connect an AWS account" })).toBeVisible();
+    await a11y(page, "attack paths empty");
+    await runSampleScan(page); // the ordinary sample has no servers either
+    await page.goto("/attack-paths");
+    await expect(page.getByRole("heading", { name: "Nothing to build paths from yet" })).toBeVisible();
+  });
+
+  test("F11-H1 the sample with an exposed server shows two ranked paths, the fix that breaks both, and links to the findings", async ({ page }) => {
+    await signUp(page);
+    await page.goto("/attack-paths");
+    await page.getByRole("link", { name: "Try a sample with paths" }).click();
+    await page.getByRole("button", { name: "Run scan" }).click();
+    await expect(page.getByRole("heading", { name: "Scan result" })).toBeVisible();
+    await page.getByRole("link", { name: "Attack paths" }).click();
+    await expect(page.getByRole("heading", { name: "Attack paths", level: 1 })).toBeVisible();
+    await expect(page.locator(".kpi").filter({ hasText: "Attack paths" }).locator(".value")).toHaveText("2");
+    await expect(page.getByRole("heading", { name: /web-1 is reachable from the internet and leads to full control of the AWS account/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /leads to database orders-db/ })).toBeVisible();
+    // the chain is a real ordered list a screen reader can follow
+    const chain = page.getByRole("article", { name: /full control of the AWS account/ }).getByRole("list", { name: "Steps of this attack path" });
+    await expect(chain.getByRole("listitem")).toHaveCount(4);
+    await expect(chain).toContainText("Internet"); await expect(chain).toContainText("web-1"); await expect(chain).toContainText("app-role"); await expect(chain).toContainText("AWS account");
+    const fixFirst = page.getByRole("region", { name: "Fix these first" }).or(page.locator("section", { has: page.getByRole("heading", { name: "Fix these first" }) }));
+    await expect(fixFirst.getByText("Remove the internet-wide rule (port 443, port 22) from web-sg").first()).toBeVisible(); // the sample group is open on both
+    await expect(fixFirst.getByText("2 paths").first()).toBeVisible();
+    await a11y(page, "attack paths");
+    // related findings link to the real finding
+    await page.getByRole("article", { name: /full control of the AWS account/ }).getByRole("link", { name: "Policy grants full administrator access" }).click();
+    await expect(page.getByRole("heading", { name: "Policy grants full administrator access" })).toBeVisible();
+    // the limits are stated, not hidden
+    await page.goto("/attack-paths");
+    await page.getByText("What this can and cannot see").click();
+    await expect(page.getByText(/Not modelled: subnets and route tables/)).toBeVisible();
+  });
+
+  test("F11-E2 closing the exposure and rescanning removes the paths", async ({ page }) => {
+    await signUp(page);
+    await page.goto("/scans/new?sample=paths");
+    const cfg = JSON.parse(await page.getByLabel("Resources (JSON)").inputValue());
+    await page.getByRole("button", { name: "Run scan" }).click();
+    await expect(page.getByRole("heading", { name: "Scan result" })).toBeVisible();
+    await page.goto("/attack-paths");
+    await expect(page.getByRole("heading", { name: /web-1 is reachable/ }).first()).toBeVisible();
+    // the same configuration with the SSH rule closed
+    cfg.resources.find((r: any) => r.name === "web-sg").ingress = [{ cidr: "10.0.0.0/16", port: 22 }];
+    await page.goto("/scans/new");
+    await page.getByLabel("Resources (JSON)").fill(JSON.stringify(cfg));
+    await page.getByRole("button", { name: "Run scan" }).click();
+    await expect(page.getByRole("heading", { name: "Scan result" })).toBeVisible();
+    await page.goto("/attack-paths");
+    await expect(page.getByRole("heading", { name: "No attack paths found" })).toBeVisible();
   });
 });
 
@@ -535,6 +596,20 @@ test.describe("isolation between organizations", () => {
 });
 
 test.describe("responsive @mobile", () => {
+  test("attack path chains stack vertically on a phone without horizontal scroll", async ({ page }) => {
+    await signUp(page);
+    await page.goto("/scans/new?sample=paths");
+    await page.getByRole("button", { name: "Run scan" }).click();
+    await expect(page.getByRole("heading", { name: "Scan result" })).toBeVisible();
+    await page.goto("/attack-paths");
+    await expect(page.getByRole("heading", { name: /web-1 is reachable/ }).first()).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+    const chain = page.getByRole("list", { name: "Steps of this attack path" }).first();
+    const boxes = await chain.getByRole("listitem").evaluateAll((els) => els.map((e) => e.getBoundingClientRect().top));
+    expect(new Set(boxes).size).toBe(boxes.length); // every step on its own row
+    await a11y(page, "attack paths mobile");
+  });
+
   test("mobile navigation drawer opens and has no horizontal scroll", async ({ page }) => {
     await signUp(page);
     await runSampleScan(page);

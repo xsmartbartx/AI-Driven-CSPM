@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation, useSearch } from "wouter";
-import { SAMPLE_CONFIG } from "@workspace/cspm-engine";
+import { SAMPLE_CONFIG, SAMPLE_PATHS_CONFIG } from "@workspace/cspm-engine";
 import { api, ApiError, useApi } from "../api";
 import { useMe } from "../App";
 import { Empty, ErrorBox, fmtTime, Kpi, Sev, Skeleton } from "../ui";
@@ -10,7 +10,7 @@ export function NewScan() {
   const search = useSearch();
   const [, nav] = useLocation();
   const usage = useApi<any>("/usage");
-  const [text, setText] = useState(() => (new URLSearchParams(search).get("sample") ? JSON.stringify(SAMPLE_CONFIG, null, 2) : ""));
+  const [text, setText] = useState(() => { const s = new URLSearchParams(search).get("sample"); return s === "paths" ? JSON.stringify(SAMPLE_PATHS_CONFIG(), null, 2) : s ? JSON.stringify(SAMPLE_CONFIG, null, 2) : ""; });
   const [errs, setErrs] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
@@ -47,6 +47,7 @@ export function NewScan() {
           <div className="row">
             <button className="btn primary" onClick={run} disabled={busy || !text.trim() || !!out} aria-busy={busy}>{busy ? "Scanning…" : "Run scan"}</button>
             <button className="btn" onClick={() => { setText(JSON.stringify(SAMPLE_CONFIG, null, 2)); setErrs([]); }}>Load sample</button>
+            <button className="btn" onClick={() => { setText(JSON.stringify(SAMPLE_PATHS_CONFIG(), null, 2)); setErrs([]); }}>Load sample with attack paths</button>
             {text && <button className="btn ghost" onClick={() => { setText(""); setErrs([]); }}>Clear</button>}
           </div>
         </section>
@@ -56,7 +57,9 @@ export function NewScan() {
             <dt><code>s3_bucket</code></dt><dd className="muted">public_read, encrypted</dd>
             <dt><code>security_group</code></dt><dd className="muted">ingress: [{"{"} cidr, port {"}"}]</dd>
             <dt><code>iam_policy</code></dt><dd className="muted">statements: [{"{"} effect, actions, resources {"}"}]</dd>
-            <dt><code>database</code></dt><dd className="muted">publicly_accessible, encrypted</dd>
+            <dt><code>database</code></dt><dd className="muted">publicly_accessible, encrypted, security_groups</dd>
+            <dt><code>ec2_instance</code></dt><dd className="muted">public_ip, security_groups, role (for attack paths)</dd>
+            <dt><code>iam_role</code></dt><dd className="muted">policies, managed_policies, inline_statements (for attack paths)</dd>
           </dl>
           <p className="muted" style={{ marginTop: 12 }}>Add <code>environment</code> (production, staging, development) and <code>criticality</code> (1–10) to weight the risk score. Up to 500 resources per scan.</p>
         </aside>
