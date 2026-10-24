@@ -45,6 +45,7 @@ services:
       STRIPE_PORTAL_CONFIG: ${STRIPE_PORTAL_CONFIG:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CSPM_AWS_ACCOUNT_ID: ${CSPM_AWS_ACCOUNT_ID:-}
+      SCHEDULER: ${SCHEDULER:-1}
       DB_POOL_MAX: ${DB_POOL_MAX:-10}
     networks: [internal]
 

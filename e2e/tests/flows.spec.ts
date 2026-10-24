@@ -425,6 +425,26 @@ test.describe("F07 cloud accounts (the e2e API uses a fake AWS)", () => {
     await expect(page.getByRole("row")).toHaveCount(5); // history stays: 4 findings + header
   });
 
+  test("F07-H2 turn automatic scans on and off; the next run is shown and survives a reload", async ({ page }) => {
+    await signUp(page);
+    await connect(page);
+    await page.getByRole("dialog").getByRole("button", { name: "Done" }).click();
+    const card = page.getByRole("region", { name: "AWS account 111122223333 in eu-west-1" });
+    await expect(card.getByLabel(/Automatic scans for/)).toHaveCount(0); // only for a verified connection
+    await card.getByRole("button", { name: "Verify connection" }).click();
+    await expect(card.getByText("Connected", { exact: true })).toBeVisible();
+    const select = card.getByLabel("Automatic scans for 111122223333 in eu-west-1");
+    await expect(select).toHaveValue("off");
+    await select.selectOption("daily");
+    await expect(card.getByText(/Next scan around/)).toBeVisible();
+    await a11y(page, "cloud accounts automatic scans");
+    await page.reload();
+    await expect(card.getByLabel(/Automatic scans for/)).toHaveValue("daily");
+    await card.getByLabel(/Automatic scans for/).selectOption("off");
+    await expect(card.getByText(/Next scan around/)).toHaveCount(0);
+    await expect(page.getByText(/use the same monthly scan allowance/)).toBeVisible();
+  });
+
   test("F07-N1 a role AWS cannot assume shows a clear message and keeps the connection as 'needs attention'", async ({ page }) => {
     await signUp(page);
     await connect(page, "000000000000");

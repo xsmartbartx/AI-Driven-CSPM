@@ -248,6 +248,59 @@ test("deleting a connection keeps its assets and findings (history), unlinked fr
   assert.equal((await c.del(`/cloud-accounts/${id}`)).status, 404);
 });
 
+test("automatic scans: only admins set them, only for a verified connection, with a start time that respects the last scan", async () => {
+  const { c: owner } = await signup();
+  const pending = (await connect(owner)).json.id;
+  assert.equal((await owner.call("PATCH", `/cloud-accounts/${pending}`, { schedule: "daily" })).json.error.code, "not_verified");
+  const id = await connected(owner, { region: "us-east-1" });
+  for (const bad of [{ schedule: "hourly" }, { schedule: "" }, {}, { schedule: 5 }]) assert.equal((await owner.call("PATCH", `/cloud-accounts/${id}`, bad)).status, 400, JSON.stringify(bad));
+  const list = async () => (await owner.get("/cloud-accounts")).json.items.find((x: any) => x.id === id);
+  assert.deepEqual([(await list()).schedule, (await list()).nextRunAt], ["off", null]);
+
+  // never scanned: the first automatic scan starts within minutes
+  assert.equal((await owner.call("PATCH", `/cloud-accounts/${id}`, { schedule: "daily" })).status, 200);
+  let x = await list(); const soon = (Date.parse(x.nextRunAt) - Date.now()) / 60000;
+  assert.equal(x.schedule, "daily"); assert.ok(soon > 0.5 && soon < 11, `first run in ${soon} min`);
+
+  // after a scan, one full interval has to pass first
+  aws.result = { resources: [bucket("b")], notes: [], complete: true };
+  assert.equal((await owner.post(`/cloud-accounts/${id}/scan`)).status, 201);
+  await owner.call("PATCH", `/cloud-accounts/${id}`, { schedule: "weekly" });
+  x = await list(); const days = (Date.parse(x.nextRunAt) - Date.now()) / 86400000;
+  assert.equal(x.schedule, "weekly"); assert.ok(days > 6.99 && days < 7.01, `next run in ${days} days`);
+  await owner.call("PATCH", `/cloud-accounts/${id}`, { schedule: "daily" });
+  const hours = (Date.parse((await list()).nextRunAt) - Date.now()) / 3600000;
+  assert.ok(hours > 23.9 && hours < 24.1, `next run in ${hours} h`);
+
+  // turning off clears it and any failure history
+  await db.query("update cloud_accounts set failure_count = 3 where id = $1", [id]);
+  await owner.call("PATCH", `/cloud-accounts/${id}`, { schedule: "off" });
+  x = await list(); assert.deepEqual([x.schedule, x.nextRunAt, x.failureCount], ["off", null, 0]);
+  assert.ok((await owner.get("/audit")).json.items.some((e: any) => e.action === "cloud.schedule" && /:off$/.test(e.target)));
+});
+
+test("automatic scans: viewers and analysts cannot change them, other organizations cannot see the connection", async () => {
+  const { c: owner } = await signup();
+  const id = await connected(owner);
+  const viewer = await member(owner, "viewer"), analyst = await member(owner, "analyst");
+  for (const who of [viewer, analyst]) assert.equal((await who.call("PATCH", `/cloud-accounts/${id}`, { schedule: "daily" })).status, 403);
+  assert.equal((await new Client().call("PATCH", `/cloud-accounts/${id}`, { schedule: "daily" })).status, 401);
+  const other = await signup("Sched Iso");
+  assert.equal((await other.c.call("PATCH", `/cloud-accounts/${id}`, { schedule: "daily" })).status, 404);
+  assert.equal((await viewer.get("/cloud-accounts")).json.items[0].schedule, "off"); // viewers can see it
+});
+
+test("a manual scan while a scheduled one holds the lease is refused, and the lease is released afterwards", async () => {
+  const { c } = await signup();
+  const id = await connected(c);
+  aws.result = { resources: [bucket("b")], notes: [], complete: true };
+  await db.query("update cloud_accounts set scan_started_at = now() where id = $1", [id]);
+  assert.equal((await c.post(`/cloud-accounts/${id}/scan`)).json.error.code, "scan_running");
+  await db.query("update cloud_accounts set scan_started_at = now() - interval '30 minutes' where id = $1", [id]); // abandoned
+  assert.equal((await c.post(`/cloud-accounts/${id}/scan`)).status, 201);
+  assert.equal((await db.query("select scan_started_at from cloud_accounts where id = $1", [id])).rows[0]!.scan_started_at, null);
+});
+
 test("audit trail records connecting, verifying, scanning and disconnecting; no External ID or ARN in it", async () => {
   const { c } = await signup();
   const id = await connected(c);
