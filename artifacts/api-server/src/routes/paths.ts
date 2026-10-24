@@ -3,6 +3,7 @@ import { analyzePaths, type Resource } from "@workspace/cspm-engine";
 import { requireRole } from "../lib/http";
 
 const r = Router();
+const LIMIT = 2000;
 
 /**
  * Attack paths for the organization, computed on request from what the scans found (no stored copy that could go stale).
@@ -17,9 +18,12 @@ r.get("/attack-paths", requireRole("viewer"), async (req, res) => {
      where a.org_id = $1 and (
        (a.account_id is not null and a.last_scan_id is not null and a.last_scan_id = c.last_scan_id)
        or (a.account_id is null and a.last_seen_at >= now() - interval '30 days'))
-     limit 2000`, [orgId]);
-  const resources: Resource[] = rows.map((x) => ({ ...(x.raw ?? {}), type: x.type, name: x.name, environment: x.environment, criticality: x.criticality }));
+     order by a.type, a.name limit ${LIMIT + 1}`, [orgId]);
+  const truncated = rows.length > LIMIT;
+  const resources: Resource[] = rows.slice(0, LIMIT).map((x) => ({ ...(x.raw ?? {}), type: x.type, name: x.name, environment: x.environment, criticality: x.criticality }));
   const analysis = analyzePaths(resources);
+  // never silently drop data: the paths that need the dropped assets would just be missing, with no hint why
+  if (truncated) analysis.notes.unshift(`This organization has more than ${LIMIT} current assets; only the first ${LIMIT} (by type and name) were used, so some paths may be missing.`);
 
   const names = [...new Set(analysis.paths.flatMap((p) => [...p.nodes.filter((n) => !["internet", "account"].includes(n.kind)).map((n) => n.name), ...p.edges.flatMap((e) => [e.fix.asset, ...e.assets])]))];
   const found = names.length

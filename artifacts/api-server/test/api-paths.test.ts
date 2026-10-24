@@ -80,6 +80,15 @@ test("permissions and isolation: viewers can read, nobody else's data is visible
   assert.equal((await v.get("/attack-paths")).json.paths.length, 2);
 });
 
+test("more assets than the analysis limit: a stable subset is used and the response says so", async () => {
+  const { c, me } = await signup();
+  await db.query("insert into assets (org_id, provider, type, name, raw) select $1, 'aws', 's3_bucket', 'b' || lpad(g::text, 5, '0'), '{}'::jsonb from generate_series(1, 2001) g", [me.org.id]);
+  const a = await c.get("/attack-paths"), b = await c.get("/attack-paths");
+  assert.equal(a.json.assetCount, 2000);
+  assert.match(a.json.notes[0], /more than 2000 current assets; only the first 2000 \(by type and name\) were used, so some paths may be missing/);
+  assert.deepEqual(a.json.notes, b.json.notes); // the same answer every time
+});
+
 test("pasted assets older than 30 days no longer count", async () => {
   const { c, me } = await signup();
   await c.post("/scans", { config: SAMPLE_PATHS_CONFIG() });

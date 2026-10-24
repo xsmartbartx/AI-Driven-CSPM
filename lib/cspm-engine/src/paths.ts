@@ -34,8 +34,27 @@ export const NOT_MODELLED = "Not modelled: subnets and route tables, network ACL
 const list = (v: unknown): string[] => (Array.isArray(v) ? v : v === undefined || v === null ? [] : [v]).filter((x): x is string => typeof x === "string");
 const isWorld = (c: unknown) => c === "0.0.0.0/0" || c === "::/0";
 const SENSITIVE = new Set([22, 3389, 1433, 3306, 5432, 6379, 9200, 27017]);
-const glob = (pattern: string, value: string) => new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")}$`, "i").test(value);
-const allows = (stmtActions: string[], action: string) => stmtActions.some((a) => glob(a, action));
+/**
+ * IAM wildcard match (* and ?) with the classic two-pointer algorithm: worst case O(pattern x value), never exponential.
+ * The patterns come from policies someone pasted, so a regex built from them could be made to backtrack for seconds and
+ * block the whole API; this cannot. Over-long inputs (IAM policies are limited to about 6 KB) simply do not match.
+ */
+export function wildcardMatch(pattern: string, value: string, ignoreCase = false): boolean {
+  if (pattern.length > MAX_PATTERN || value.length > MAX_PATTERN) return false;
+  if (ignoreCase) { pattern = pattern.toLowerCase(); value = value.toLowerCase(); }
+  let p = 0, v = 0, star = -1, mark = 0;
+  while (v < value.length) {
+    if (p < pattern.length && (pattern[p] === "?" || pattern[p] === value[v])) { p++; v++; }
+    else if (p < pattern.length && pattern[p] === "*") { star = p++; mark = v; }
+    else if (star !== -1) { p = star + 1; v = ++mark; }
+    else return false;
+  }
+  while (p < pattern.length && pattern[p] === "*") p++;
+  return p === pattern.length;
+}
+const MAX_PATTERN = 4096, MAX_STATEMENTS = 200, MAX_ENTRIES = 100;
+const glob = (pattern: string, value: string) => wildcardMatch(pattern, value); // resource ARNs are case-sensitive
+const allows = (stmtActions: string[], action: string) => stmtActions.some((a) => wildcardMatch(a, action, true)); // action names are not
 
 interface Ingress { cidr?: string; port?: number | string; fromPort?: number; toPort?: number; sourceGroup?: string }
 const rangeOf = (i: Ingress): [number, number] => {
@@ -85,6 +104,8 @@ export function analyzePaths(resources: Resource[]): PathAnalysis {
   for (const p of policies) { policyIndex.set(p.name, p); const short = p.name.split(":").pop(); if (short) policyIndex.set(short, p); }
 
   const unknownManaged = new Set<string>(), unresolvedPolicies = new Set<string>();
+  let truncatedRoles = 0;
+  const cap = (xs: string[]) => (xs.length > MAX_ENTRIES ? (truncatedRoles++, xs.slice(0, MAX_ENTRIES)) : xs);
   /** The statements a role is allowed by: attached customer policies, inline statements and known managed policies. */
   const statementsOf = (role: Resource) => {
     const out: { effect: string; actions: string[]; resources: string[]; from: string; asset?: string }[] = [];
@@ -99,7 +120,9 @@ export function analyzePaths(resources: Resource[]): PathAnalysis {
       if (!stmts) { unknownManaged.add(managedName(arn)); continue; }
       for (const s of stmts) out.push({ ...s, from: managedName(arn) });
     }
-    return out.filter((s) => s.effect.toLowerCase() === "allow");
+    const allowed = out.filter((s) => s.effect.toLowerCase() === "allow").map((s) => ({ ...s, actions: cap(s.actions), resources: cap(s.resources) }));
+    if (allowed.length > MAX_STATEMENTS) { truncatedRoles++; return allowed.slice(0, MAX_STATEMENTS); }
+    return allowed;
   };
 
   const nodes = new Map<string, PathNode>();
@@ -145,9 +168,13 @@ export function analyzePaths(resources: Resource[]): PathAnalysis {
       edges.push({ from: roleNode.id, to: acct.id, kind: "grants_admin", factor: 1, assets: takeover.asset ? [takeover.asset] : [], label: `${takeover.from} lets ${role.name} ${takeover.actions.includes("*") ? "do anything" : "manage IAM"} on everything, which is full control of the account`, fix: { id: `narrow:${role.name}`, action: `Replace the broad permissions of ${role.name} with only what it needs`, asset: role.name } });
     }
     for (const b of takeover ? [] : buckets) { // full control already covers every bucket: no separate path per bucket
-      const reader = stmts.find((s) => (allows(s.actions, "s3:GetObject") || s.actions.includes("*")) && s.resources.some((x) => x === "*" || glob(x, `arn:aws:s3:::${b.name}`) || glob(x, `arn:aws:s3:::${b.name}/x`)));
+      const arn = `arn:aws:s3:::${b.name}`;
+      // the whole bucket (arn:aws:s3:::b, arn:aws:s3:::b/*, a pattern with a wildcard) OR only a prefix inside it (arn:aws:s3:::b/logs/*)
+      const covers = (x: string) => x === "*" || glob(x, arn) || glob(x, `${arn}/x`);
+      const reader = stmts.find((s) => (allows(s.actions, "s3:GetObject") || s.actions.includes("*")) && s.resources.some((x) => covers(x) || x.startsWith(`${arn}/`)));
       if (!reader) continue;
-      edges.push({ from: roleNode.id, to: node("bucket", b.name, b).id, kind: "reads", factor: 0.75 * crit(b), assets: reader.asset ? [reader.asset, b.name] : [b.name], label: `${reader.from} lets ${role.name} read objects in ${b.name}`, fix: { id: `narrow:${role.name}`, action: `Limit ${role.name} so it cannot read ${b.name}`, asset: role.name } });
+      const wholeBucket = reader.resources.some(covers);
+      edges.push({ from: roleNode.id, to: node("bucket", b.name, b).id, kind: "reads", factor: 0.75 * crit(b), assets: reader.asset ? [reader.asset, b.name] : [b.name], label: `${reader.from} lets ${role.name} read ${wholeBucket ? "objects" : "some objects (a prefix)"} in ${b.name}`, fix: { id: `narrow:${role.name}`, action: `Limit ${role.name} so it cannot read ${b.name}`, asset: role.name } });
     }
   }
 
@@ -185,7 +212,7 @@ export function analyzePaths(resources: Resource[]): PathAnalysis {
         const score = Math.max(1, Math.min(100, Math.round(100 * t.reduce((p, x) => p * x.factor, 1))));
         const first = nodes.get(t[0]!.to)!;
         found.push({
-          id: t.map((x) => `${x.from}>${x.to}`).join("|"), score, severity: severityOf(score), target: n.name,
+          id: t.map((x) => `${x.from}>${x.to}#${x.fix.id}`).join("|"), score, severity: severityOf(score), target: n.name,
           title: `${first.name} is reachable from the internet and leads to ${n.kind === "account" ? "full control of the AWS account" : `${n.kind === "bucket" ? "bucket" : "database"} ${n.name}`}`,
           nodes: [internet, ...t.map((x) => nodes.get(x.to)!)], edges: t.map(({ factor: _f, ...x }) => x),
         });
@@ -209,6 +236,7 @@ export function analyzePaths(resources: Resource[]): PathAnalysis {
 
   if (!instances.length) notes.unshift("No instances were found, so no attack paths can be built. Instances and their roles come from a connected AWS account (with the updated role template) or from ec2_instance and iam_role entries in a pasted configuration.");
   if (cov.instancesWithoutRole) notes.push(`${cov.instancesWithoutRole} instance${cov.instancesWithoutRole === 1 ? "" : "s"} ${cov.instancesWithoutRole === 1 ? "has" : "have"} no role information, so paths through ${cov.instancesWithoutRole === 1 ? "it" : "them"} to the account or to data are not shown.`);
+  if (truncatedRoles) notes.push(`${truncatedRoles === 1 ? "A role's permission list was" : `${truncatedRoles} role permission lists were`} very large: only the first ${MAX_STATEMENTS} statements, and ${MAX_ENTRIES} actions or resources per statement, were read.`);
   if (unknownManaged.size) notes.push(`These AWS-managed policies are attached to a role but their contents are not known here, so they were not evaluated: ${[...unknownManaged].sort().join(", ")}.`);
   if (unresolvedPolicies.size) notes.push(`These policies are attached to a role but were not part of the scan: ${[...unresolvedPolicies].sort().join(", ")}.`);
   return { paths, chokePoints, coverage: cov, notes };

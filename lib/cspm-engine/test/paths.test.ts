@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { analyzePaths, evaluate, parseInput, SAMPLE_PATHS_CONFIG, type Resource } from "../src/index.ts";
+import { analyzePaths, evaluate, parseInput, SAMPLE_PATHS_CONFIG, wildcardMatch, type Resource } from "../src/index.ts";
 
 const sg = (name: string, ingress: object[], extra: object = {}): Resource => ({ type: "security_group", name, ingress, ...extra } as any);
 const inst = (name: string, o: object = {}): Resource => ({ type: "ec2_instance", name, environment: "production", public_ip: true, security_groups: ["web-sg"], ...o } as any);
@@ -124,6 +124,54 @@ test("instances and roles are accepted in a scan without being reported as unsup
   const e = evaluate(resources);
   assert.deepEqual(e.unknownTypes, []);
   assert.deepEqual(e.findings.map((f) => f.resourceName), ["web-sg"]); // only the security group has rules
+});
+
+test("wildcard matching: * and ? behave like IAM, special characters are literal, and it never goes exponential", () => {
+  const m = wildcardMatch;
+  assert.ok(m("*", "anything")); assert.ok(m("", "")); assert.ok(!m("", "x")); assert.ok(m("s3:*", "s3:GetObject")); assert.ok(!m("s3:*", "ec2:Run"));
+  assert.ok(m("arn:aws:s3:::b/*", "arn:aws:s3:::b/logs/2024/x.gz")); assert.ok(!m("arn:aws:s3:::b/*", "arn:aws:s3:::b"));
+  assert.ok(m("a?c", "abc")); assert.ok(!m("a?c", "ac")); assert.ok(m("*a*b*", "xxaxxbxx")); assert.ok(!m("*b*a*", "xxaxxbxx"));
+  assert.ok(m("a.c+(d)", "a.c+(d)")); assert.ok(!m("a.c", "abc")); // regex characters mean nothing here
+  assert.ok(m("S3:getobject", "s3:GetObject", true)); assert.ok(!m("S3:getobject", "s3:GetObject")); // action names ignore case, ARNs do not
+  assert.ok(!m("*".repeat(5000), "x")); assert.ok(!m("a", "a".repeat(5000))); // over-long input never matches
+  // the pattern a regex would take forever on: many stars, a long value that almost matches
+  const evil = "*a".repeat(40) + "*b", value = "a".repeat(4000);
+  const t0 = Date.now(); assert.equal(m(evil, value), false); assert.ok(Date.now() - t0 < 200, `took ${Date.now() - t0} ms`);
+});
+
+test("a pasted policy full of pathological patterns cannot stall the analysis", () => {
+  const evil = "*a".repeat(40) + "*b";
+  const buckets = Array.from({ length: 50 }, (_, i) => bucket(`${"a".repeat(60)}${i}`));
+  const t0 = Date.now();
+  const r = analyzePaths([WORLD_SSH, inst("web-1", { role: "app-role" }), role("app-role", { inline_statements: [{ effect: "Allow", actions: [evil, "s3:GetObject"], resources: [evil, `arn:aws:s3:::${"a".repeat(60)}7/*`] }] }), ...buckets]);
+  assert.ok(Date.now() - t0 < 500, `took ${Date.now() - t0} ms`);
+  assert.deepEqual(r.paths.map((p) => p.target), [`${"a".repeat(60)}7`]); // the one honest match still found
+});
+
+test("a read permission scoped to a prefix still leads to the bucket, and says so; a similarly named bucket does not match", () => {
+  const base = (resources: string[]) => analyzePaths([WORLD_SSH, inst("web-1", { role: "app-role" }), role("app-role", { inline_statements: [{ effect: "Allow", actions: ["s3:GetObject"], resources }] }), bucket("data"), bucket("data-archive")]);
+  const prefix = base(["arn:aws:s3:::data/logs/*"]);
+  assert.deepEqual(prefix.paths.map((p) => p.target), ["data"]);
+  assert.match(prefix.paths[0]!.edges[2]!.label, /read some objects \(a prefix\) in data/);
+  const whole = base(["arn:aws:s3:::data/*"]);
+  assert.match(whole.paths[0]!.edges[2]!.label, /read objects in data$/);
+  assert.deepEqual(base(["arn:aws:s3:::data*/*"]).paths.map((p) => p.target).sort(), ["data", "data-archive"]); // a wildcard in the name covers both
+  assert.equal(base(["arn:aws:s3:::other/*"]).paths.length, 0);
+});
+
+test("two paths over the same nodes through different open security groups get different ids", () => {
+  const r = analyzePaths([sg("web-sg", [{ cidr: "0.0.0.0/0", port: 22 }]), sg("extra-sg", [{ cidr: "0.0.0.0/0", port: 3389 }]), inst("web-1", { role: "app-role", security_groups: ["web-sg", "extra-sg"] }), ADMIN]);
+  assert.equal(r.paths.length, 2);
+  assert.notEqual(r.paths[0]!.id, r.paths[1]!.id);
+  assert.equal(new Set(r.paths.map((p) => p.id)).size, 2);
+  const fixes = r.chokePoints.filter((c) => c.paths === 1 && /web-sg|extra-sg/.test(c.asset)).length;
+  assert.equal(fixes, 2); // each group's rule is its own fix: closing one leaves the other path
+});
+
+test("very large permission lists are truncated with a note, not silently", () => {
+  const stmts = Array.from({ length: 250 }, (_, i) => ({ effect: "Allow", actions: ["ec2:Describe*"], resources: [`arn:aws:ec2:::thing${i}`] }));
+  const r = analyzePaths([WORLD_SSH, inst("web-1", { role: "app-role" }), role("app-role", { inline_statements: stmts })]);
+  assert.ok(r.notes.some((n) => /very large: only the first 200 statements/.test(n)));
 });
 
 test("the sample used in docs and demos produces the two headline paths", () => {

@@ -180,6 +180,18 @@ test("roles: only roles that instances run as are read; customer-managed, AWS-ma
   assert.equal(seen.some((s) => s.endsWith(":unused-role")), false); // a role no instance uses is never fetched
 });
 
+test("roles: dropped inline statements and policies beyond the 20-policy limit are reported", async () => {
+  const inline: Record<string, any> = { odd: { Statement: [{ Effect: "Allow", NotAction: "iam:*", Resource: "*" }, { Effect: "Allow", Action: "s3:GetObject", Resource: "*" }] } };
+  for (let i = 0; i < 22; i++) inline[`p${i}`] = { Statement: [] };
+  const r = await collectWithClients(fake({
+    instances: [INSTANCE("i-1")], profiles: [{ Arn: "arn:aws:iam::111122223333:instance-profile/app-profile", Roles: [{ RoleName: "app-role" }] }],
+    roles: { "app-role": { inline } },
+  }), ctx);
+  assert.ok(r.notes.some((n) => /1 inline-policy statement uses NotAction or NotResource and was not evaluated/.test(n)));
+  assert.ok(r.notes.some((n) => /1 role has more than 20 inline policies; only the first 20 were read/.test(n)));
+  assert.equal(r.complete, true); // optional relationship data never makes the scan incomplete
+});
+
 test("security groups carry their id and group-to-group rules; databases carry their security groups", () => {
   const g = mapSecurityGroup({ GroupId: "sg-db", GroupName: "db", IpPermissions: [
     { IpProtocol: "tcp", FromPort: 5432, ToPort: 5432, UserIdGroupPairs: [{ GroupId: "sg-web" }] },

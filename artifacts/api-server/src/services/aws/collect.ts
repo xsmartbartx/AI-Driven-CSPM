@@ -219,7 +219,7 @@ async function collectInstances(c: AwsClients, room: () => number): Promise<{ re
 /** Only the roles instances actually run as: a role nobody can use from the internet is not part of any path. */
 async function collectRoles(c: AwsClients, accountId: string, roleNames: string[], notes: string[], room: () => number): Promise<Resource[]> {
   const out: Resource[] = [];
-  let failed = 0;
+  let failed = 0, skippedStatements = 0, tooManyInline = 0;
   await pool(roleNames.slice(0, Math.max(0, room())), async (RoleName) => {
     try {
       const attached: any[] = [];
@@ -229,10 +229,12 @@ async function collectRoles(c: AwsClients, accountId: string, roleNames: string[
       marker = undefined;
       do { const r = await c.iam.send(new ListRolePoliciesCommand({ RoleName, ...(marker ? { Marker: marker } : {}) })); names.push(...(r.PolicyNames ?? [])); marker = r.IsTruncated ? r.Marker : undefined; } while (marker);
       const inline: { effect: string; actions: string[]; resources: string[] }[] = [];
+      if (names.length > 20) tooManyInline++;
       for (const PolicyName of names.slice(0, 20)) {
         const d = await c.iam.send(new GetRolePolicyCommand({ RoleName, PolicyName }));
         const m = mapPolicy(accountId, PolicyName, d.PolicyDocument);
         inline.push(...(m.resource["statements"] as any[]));
+        skippedStatements += m.skipped;
       }
       out.push({
         type: "iam_role", name: RoleName,
@@ -242,6 +244,8 @@ async function collectRoles(c: AwsClients, accountId: string, roleNames: string[
       });
     } catch { failed++; }
   });
+  if (skippedStatements) notes.push(`IAM roles: ${skippedStatements} inline-policy statement${skippedStatements === 1 ? " uses" : "s use"} NotAction or NotResource and ${skippedStatements === 1 ? "was" : "were"} not evaluated, so some paths through ${skippedStatements === 1 ? "it" : "them"} may be missing.`);
+  if (tooManyInline) notes.push(`IAM roles: ${tooManyInline} role${tooManyInline === 1 ? " has" : "s have"} more than 20 inline policies; only the first 20 were read, so some permissions may be missing.`);
   if (failed) notes.push(`IAM roles: ${failed} role${failed === 1 ? "" : "s"} used by instances could not be read, so paths through ${failed === 1 ? "it" : "them"} are not shown.`);
   return out;
 }
