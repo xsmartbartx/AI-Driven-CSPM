@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { evaluate, parseInput } from "@workspace/cspm-engine";
+import { analyzePaths, evaluate, parseInput } from "@workspace/cspm-engine";
 import { collectWithClients, environmentFromTags, mapBucket, mapDbInstance, mapPolicy, mapSecurityGroup, type AwsClients } from "../src/services/aws/collect.ts";
 import { cloudFormationTemplate, isAccountId, isRoleName, READ_ONLY_ACTIONS } from "../src/services/aws/setup.ts";
 import { friendlyAwsError } from "../src/services/aws/connector.ts";
@@ -11,6 +11,9 @@ const awsErr = (name: string, extra: object = {}) => Object.assign(new Error(`${
 interface World {
   buckets?: Record<string, { policyPublic?: boolean | "none"; acl?: any[]; pab?: any | "none"; enc?: boolean; tags?: any[] | "none"; deny?: boolean }>;
   groups?: any[]; policies?: { name: string; arn: string; doc: any }[]; dbs?: any[];
+  instances?: any[]; profiles?: { Arn: string; Roles: { RoleName: string }[] }[];
+  roles?: Record<string, { attached?: { PolicyName: string; PolicyArn: string }[]; inline?: Record<string, any>; fail?: boolean }>;
+  failCommands?: Record<string, Error>;
   fail?: Partial<Record<"s3" | "ec2" | "iam" | "rds", Error>>;
   pageSize?: number;
 }
@@ -32,6 +35,12 @@ function fake(w: World): AwsClients {
       if (n === "DescribeSecurityGroupsCommand") { const p = page(w.groups ?? [], i.NextToken, "g"); return { SecurityGroups: p.items, NextToken: p.next }; }
       if (n === "ListPoliciesCommand") { const p = page(w.policies ?? [], i.Marker, "p"); return { Policies: p.items.map((x) => ({ PolicyName: x.name, Arn: x.arn, DefaultVersionId: "v1" })), IsTruncated: !!p.next, Marker: p.next }; }
       if (n === "GetPolicyVersionCommand") { const pol = w.policies!.find((x) => x.arn === i.PolicyArn)!; return { PolicyVersion: { Document: typeof pol.doc === "string" ? pol.doc : encodeURIComponent(JSON.stringify(pol.doc)) } }; }
+      if (w.failCommands?.[n]) throw w.failCommands[n];
+      if (n === "DescribeInstancesCommand") { const p = page(w.instances ?? [], i.NextToken, "i"); return { Reservations: p.items.map((x) => ({ Instances: [x] })), NextToken: p.next }; }
+      if (n === "ListInstanceProfilesCommand") return { InstanceProfiles: w.profiles ?? [], IsTruncated: false };
+      if (n === "ListAttachedRolePoliciesCommand") { const r = w.roles?.[i.RoleName]; if (r?.fail) throw awsErr("AccessDenied"); return { AttachedPolicies: r?.attached ?? [], IsTruncated: false }; }
+      if (n === "ListRolePoliciesCommand") return { PolicyNames: Object.keys(w.roles?.[i.RoleName]?.inline ?? {}), IsTruncated: false };
+      if (n === "GetRolePolicyCommand") return { PolicyDocument: encodeURIComponent(JSON.stringify(w.roles![i.RoleName]!.inline![i.PolicyName])) };
       if (n === "DescribeDBInstancesCommand") { const p = page(w.dbs ?? [], i.Marker, "d"); return { DBInstances: p.items, Marker: p.next }; }
       throw new Error(`unexpected command ${n}`);
     },
@@ -141,6 +150,81 @@ test("hitting the S3 or IAM cap exactly, with more pages still to read, is repor
   assert.equal(exact.notes.some((n) => /S3: more than/.test(n)), false);
 });
 
+const INSTANCE = (id: string, o: any = {}) => ({ InstanceId: id, State: { Name: "running" }, PublicIpAddress: "203.0.113.10", SecurityGroups: [{ GroupId: "sg-web", GroupName: "web" }], IamInstanceProfile: { Arn: "arn:aws:iam::111122223333:instance-profile/app-profile" }, Tags: [{ Key: "Name", Value: "web-1" }, { Key: "env", Value: "prod" }], ...o });
+
+test("instances: name, public IP, security groups, environment and the role behind the instance profile; stopped ones are ignored", async () => {
+  const r = await collectWithClients(fake({
+    instances: [INSTANCE("i-1"), INSTANCE("i-2", { State: { Name: "terminated" } }), INSTANCE("i-3", { PublicIpAddress: undefined, IamInstanceProfile: undefined, Tags: [] })],
+    profiles: [{ Arn: "arn:aws:iam::111122223333:instance-profile/app-profile", Roles: [{ RoleName: "app-role" }] }],
+    roles: { "app-role": {} },
+  }), ctx);
+  const ins = r.resources.filter((x) => x.type === "ec2_instance");
+  assert.deepEqual(ins.map((x) => x.name), ["web-1 (i-1)", "i-3"]);
+  assert.deepEqual([ins[0]!["public_ip"], ins[0]!["security_groups"], ins[0]!["role"], ins[0]!.environment], [true, ["sg-web"], "app-role", "production"]);
+  assert.deepEqual([ins[1]!["public_ip"], ins[1]!["role"]], [false, undefined]);
+});
+
+test("roles: only roles that instances run as are read; customer-managed, AWS-managed and inline policies are told apart", async () => {
+  const seen: string[] = [];
+  const clients = fake({
+    instances: [INSTANCE("i-1")],
+    profiles: [{ Arn: "arn:aws:iam::111122223333:instance-profile/app-profile", Roles: [{ RoleName: "app-role" }] }, { Arn: "arn:aws:iam::111122223333:instance-profile/unused", Roles: [{ RoleName: "unused-role" }] }],
+    roles: { "app-role": { attached: [{ PolicyName: "Custom", PolicyArn: "arn:aws:iam::111122223333:policy/Custom" }, { PolicyName: "AdministratorAccess", PolicyArn: "arn:aws:iam::aws:policy/AdministratorAccess" }], inline: { scratch: { Statement: [{ Effect: "Allow", Action: "s3:GetObject", Resource: "arn:aws:s3:::data/*" }] } } }, "unused-role": {} },
+  });
+  const orig = clients.iam.send.bind(clients.iam); clients.iam.send = async (cmd: any) => { seen.push(`${cmd.constructor.name}:${cmd.input?.RoleName ?? ""}`); return orig(cmd); };
+  const r = await collectWithClients(clients, ctx);
+  const role = r.resources.find((x) => x.type === "iam_role")!;
+  assert.deepEqual([role.name, role["policies"], role["managed_policies"]], ["app-role", ["111122223333:Custom"], ["arn:aws:iam::aws:policy/AdministratorAccess"]]);
+  assert.deepEqual(role["inline_statements"], [{ effect: "Allow", actions: ["s3:GetObject"], resources: ["arn:aws:s3:::data/*"] }]);
+  assert.equal(r.resources.filter((x) => x.type === "iam_role").length, 1);
+  assert.equal(seen.some((s) => s.endsWith(":unused-role")), false); // a role no instance uses is never fetched
+});
+
+test("security groups carry their id and group-to-group rules; databases carry their security groups", () => {
+  const g = mapSecurityGroup({ GroupId: "sg-db", GroupName: "db", IpPermissions: [
+    { IpProtocol: "tcp", FromPort: 5432, ToPort: 5432, UserIdGroupPairs: [{ GroupId: "sg-web" }] },
+    { IpProtocol: "-1", UserIdGroupPairs: [{ GroupId: "sg-admin" }] },
+    { IpProtocol: "tcp", FromPort: 8000, ToPort: 8100, UserIdGroupPairs: [{ GroupId: "sg-web" }], IpRanges: [{ CidrIp: "10.0.0.0/8" }] },
+  ] });
+  assert.equal(g["id"], "sg-db");
+  assert.deepEqual(g["ingress"], [{ sourceGroup: "sg-web", port: 5432 }, { sourceGroup: "sg-admin", port: "all" }, { sourceGroup: "sg-web", fromPort: 8000, toPort: 8100 }, { cidr: "10.0.0.0/8", fromPort: 8000, toPort: 8100 }]);
+  assert.deepEqual(mapDbInstance("1", "r", { DBInstanceIdentifier: "o", VpcSecurityGroups: [{ VpcSecurityGroupId: "sg-db" }] })["security_groups"], ["sg-db"]);
+  // a group-to-group rule is not internet exposure
+  assert.deepEqual(evaluate([g]).findings, []);
+});
+
+test("relationship data is optional: if it cannot be read the scan stays complete and says what to do", async () => {
+  const denied = awsErr("UnauthorizedOperation");
+  const r = await collectWithClients(fake({ buckets: { a: { enc: true } }, failCommands: { DescribeInstancesCommand: denied } }), ctx);
+  assert.equal(r.complete, true); // an older role template must not turn every scan into an incomplete one
+  assert.ok(r.notes.some((n) => /EC2 instances: access denied, so attack paths cannot be built\. Redeploy the setup template/.test(n)));
+  assert.deepEqual(r.resources.map((x) => x.type), ["s3_bucket"]);
+  const noProfiles = await collectWithClients(fake({ instances: [INSTANCE("i-1")], failCommands: { ListInstanceProfilesCommand: awsErr("AccessDenied") } }), ctx);
+  assert.equal(noProfiles.complete, true); assert.ok(noProfiles.notes.some((n) => /iam:ListInstanceProfiles denied/.test(n)));
+  assert.equal(noProfiles.resources.find((x) => x.type === "ec2_instance")!["role"], undefined);
+  const roleFails = await collectWithClients(fake({ instances: [INSTANCE("i-1")], profiles: [{ Arn: "arn:aws:iam::111122223333:instance-profile/app-profile", Roles: [{ RoleName: "app-role" }] }], roles: { "app-role": { fail: true } } }), ctx);
+  assert.equal(roleFails.complete, true); assert.ok(roleFails.notes.some((n) => /IAM roles: 1 role used by instances could not be read/.test(n)));
+});
+
+test("the whole chain: what the collector returns becomes the attack path the engine finds", async () => {
+  const r = await collectWithClients(fake({
+    groups: [
+      { GroupId: "sg-web", GroupName: "web", IpPermissions: [{ IpProtocol: "tcp", FromPort: 22, ToPort: 22, IpRanges: [{ CidrIp: "0.0.0.0/0" }] }] },
+      { GroupId: "sg-db", GroupName: "db", IpPermissions: [{ IpProtocol: "tcp", FromPort: 5432, ToPort: 5432, UserIdGroupPairs: [{ GroupId: "sg-web" }] }] },
+    ],
+    instances: [INSTANCE("i-1")],
+    profiles: [{ Arn: "arn:aws:iam::111122223333:instance-profile/app-profile", Roles: [{ RoleName: "app-role" }] }],
+    roles: { "app-role": { attached: [{ PolicyName: "Everything", PolicyArn: "arn:aws:iam::111122223333:policy/Everything" }] } },
+    policies: [{ name: "Everything", arn: "arn:aws:iam::111122223333:policy/Everything", doc: { Statement: [{ Effect: "Allow", Action: "*", Resource: "*" }] } }],
+    dbs: [{ DBInstanceIdentifier: "orders", PubliclyAccessible: false, StorageEncrypted: true, VpcSecurityGroups: [{ VpcSecurityGroupId: "sg-db" }], TagList: [{ Key: "env", Value: "prod" }] }],
+  }), ctx);
+  assert.deepEqual(parseInput(r.resources).errors, []);
+  const a = analyzePaths(r.resources);
+  assert.deepEqual(a.paths.map((p) => [p.target, p.score]), [["AWS account (full control)", 100], ["111122223333/eu-west-1/orders", 77]]);
+  assert.match(a.paths[0]!.edges[0]!.label, /web-1 \(i-1\) has a public IP and web \(sg-web\) lets the internet in on port 22/);
+  assert.equal(a.chokePoints[0]!.asset, "web (sg-web)");
+});
+
 test("one failing service does not stop the others; it is reported and the result is incomplete", async () => {
   const r = await collectWithClients(fake({ buckets: { a: { enc: true } }, dbs: [{ DBInstanceIdentifier: "d" }], fail: { ec2: awsErr("UnauthorizedOperation"), iam: awsErr("ThrottlingException") } }), ctx);
   assert.deepEqual(r.resources.map((x) => x.type).sort(), ["database", "s3_bucket"]);
@@ -166,6 +250,7 @@ test("CloudFormation template: trusts only our account AND the ExternalId, read-
   for (const a of actions) assert.match(a!, /^[a-z0-9]+:(List|Get|Describe)/, a); // read-only verbs only
   assert.equal(/\*/.test(actions.join("")), false);
   assert.equal(/s3:GetObject|secretsmanager|ssm:|logs:|kms:Decrypt|iam:Create|iam:Put|iam:Attach/.test(t), false); // no data, secrets, logs or writes
+  for (const a of ["ec2:DescribeInstances", "iam:ListInstanceProfiles", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies", "iam:GetRolePolicy"]) assert.ok((actions as string[]).includes(a), a); // the permissions attack paths need
   for (const bad of [{ externalId: "x\nInjected: yes" }, { externalId: "short" }, { principalAccountId: "12345" }, { roleName: "bad name; rm" }])
     assert.throws(() => cloudFormationTemplate({ principalAccountId: "123456789012", externalId: "nx-abcdefghijklmnopqrstuvwx", roleName: "R", ...bad }), /invalid template input/);
 });

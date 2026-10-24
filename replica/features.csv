@@ -24,7 +24,7 @@ AI Q&A over own findings,ai,could,no,no,tenant-scoped retrieval
 AWS read-only account connection (role + external ID),integrations,should,roadmap,partial,"built: connect, verify, scan (S3, SG, IAM customer policies, RDS); tested with fakes + mock STS; never run on real AWS, off by default (replica/aws-setup.md)"
 Azure and GCP connectors,integrations,could,no,no,phase 2
 Kubernetes checks,integrations,could,no,no,phase 2
-Attack path analysis,attack-paths,could,no,no,phase 2 graph
+Attack path analysis,attack-paths,could,no,partial,"built: internet -> server -> role -> account/bucket and server -> database; from pasted servers/roles or a connected AWS account (new role permissions); heuristic score, choke points; never run on real AWS; see replica/attack-paths.md"
 Executive PDF/CSV reports,reports,could,no,partial,CSV only
 Notifications (email Slack),notify,could,no,no,
 API keys and public REST API,api,should,partial,yes,orval pipeline exists

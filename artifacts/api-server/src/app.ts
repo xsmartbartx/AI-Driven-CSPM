@@ -9,6 +9,7 @@ import { createMailer, type Mailer } from "./services/mail";
 import { createAwsConnector, disabledAwsConnector } from "./services/aws/connector";
 import type { AwsConnector } from "./services/aws/types";
 import cloudRouter from "./routes/cloud";
+import pathsRouter from "./routes/paths";
 import healthRouter from "./routes/health";
 import authRouter from "./routes/auth";
 import scansRouter from "./routes/scans";
@@ -49,7 +50,7 @@ export function createApp(db: Db, opts: { mailer?: Mailer; aws?: AwsConnector } 
     next();
   });
 
-  app.use("/api", healthRouter, authRouter, scansRouter, findingsRouter, teamRouter, cloudRouter);
+  app.use("/api", healthRouter, authRouter, scansRouter, findingsRouter, teamRouter, cloudRouter, pathsRouter);
   app.use("/api", (_req, _res, next) => next(new HttpError(404, "not_found", "Unknown endpoint")));
 
   app.use((err: any, req: Request, res: Response, _next: NextFunction) => {

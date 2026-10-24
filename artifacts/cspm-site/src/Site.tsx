@@ -119,7 +119,7 @@ function Home() {
             <div className="card" key={t}><h3 className="h2" style={{ marginBottom: 4 }}>{t}</h3><p className="muted">{d}</p></div>
           ))}
         </div>
-        <p className="honest">Paste-your-config is the supported way to scan today. Connecting a live AWS account (read-only role, no keys stored) is built but still being tested against real accounts, so it is not switched on yet. Attack paths and generated fixes are on the roadmap. We would rather say so than show a screenshot of something that does not exist yet.</p>
+        <p className="honest">Paste-your-config is the supported way to scan today. Connecting a live AWS account (read-only role, no keys stored) is built but still being tested against real accounts, so it is not switched on yet. Attack paths (an internet-facing server whose role can reach your account or data) are built from servers and roles in a pasted configuration or a connected account; generated fixes are on the roadmap. We would rather say so than show a screenshot of something that does not exist yet.</p>
       </div></section>
 
       <section className="block"><div className="wrap">
@@ -212,7 +212,8 @@ function Docs() {
         <li><code>s3_bucket</code>: <code>public_read</code>, <code>encrypted</code></li>
         <li><code>security_group</code>: <code>ingress</code> list of <code>{"{ cidr, port }"}</code> (port can be a number or <code>"all"</code>)</li>
         <li><code>iam_policy</code>: <code>statements</code> list of <code>{"{ effect, actions, resources }"}</code></li>
-        <li><code>database</code>: <code>publicly_accessible</code>, <code>encrypted</code></li>
+        <li><code>database</code>: <code>publicly_accessible</code>, <code>encrypted</code>, <code>security_groups</code></li>
+        <li>For attack paths: <code>ec2_instance</code> (<code>public_ip</code>, <code>security_groups</code>, <code>role</code>) and <code>iam_role</code> (<code>policies</code>, <code>managed_policies</code>, <code>inline_statements</code>); a security group rule can name another group with <code>sourceGroup</code></li>
       </ul>
       <h3>3. Scan</h3>
       <p>Paste into <em>New scan</em> in the dashboard, or call the API with a key from <em>Settings</em>:</p>
