@@ -1,0 +1,52 @@
+# Variant for hosts where a shared proxy terminates TLS: plain HTTP only, no certificates. See docker-compose.shared-edge.yml.
+# Three hostnames, automatic HTTPS (Let's Encrypt) once DNS points here and ports 80/443 are open.
+# Hostnames come from the environment (see .env): SITE_HOST, APP_HOST, API_HOST.
+{
+	auto_https off
+}
+
+(security) {
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Strict-Transport-Security "max-age=63072000; includeSubDomains"
+		-Server
+	}
+}
+
+# Marketing site
+http://{$SITE_HOST} {
+	import security
+	header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://{$API_HOST}; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+	root * /srv/site
+	encode zstd gzip
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+	try_files {path} /index.html
+	file_server
+}
+
+# Dashboard
+http://{$APP_HOST} {
+	import security
+	header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://{$API_HOST}; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+	root * /srv/app
+	encode zstd gzip
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+	try_files {path} /index.html
+	file_server
+}
+
+# API
+http://{$API_HOST} {
+	import security
+	request_body {
+		max_size 2MB
+	}
+	reverse_proxy api:8080 {
+		header_up X-Forwarded-For {remote_host}
+	}
+}
