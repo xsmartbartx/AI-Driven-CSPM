@@ -335,6 +335,28 @@ test("API keys: shown once, authenticate as analyst, revocable", async () => {
   assert.equal((await api.get("/findings")).status, 401);
 });
 
+test("API keys: read-only keys cannot scan, expiry is enforced, bad options are refused", async () => {
+  const { c } = await signup();
+  const ro = await c.post("/api-keys", { name: "dashboard", access: "read", expiresInDays: 30 });
+  assert.equal(ro.status, 201); assert.equal(ro.json.access, "read");
+  const days = (new Date(ro.json.expiresAt).getTime() - Date.now()) / 86400000;
+  assert.ok(days > 29.9 && days < 30.1, String(days));
+  const reader = new Client(ro.json.key);
+  assert.equal((await c.post("/scans", { config: SAMPLE_CONFIG })).status, 201);
+  assert.equal((await reader.get("/findings")).json.total, 7);               // can read
+  assert.equal((await reader.post("/scans", { config: SAMPLE_CONFIG })).status, 403); // cannot scan
+  const listed = (await c.get("/api-keys")).json.items.find((x: any) => x.id === ro.json.id);
+  assert.equal(listed.role, "viewer"); assert.ok(listed.expiresAt);
+  // the default stays what it was: scan access, no expiry
+  const old = await c.post("/api-keys", { name: "legacy" });
+  assert.equal(old.json.access, "scan"); assert.equal(old.json.expiresAt, null);
+  assert.equal((await new Client(old.json.key).post("/scans", { config: SAMPLE_CONFIG })).status, 201);
+  // an expired key stops working at once (no cache to wait out)
+  await db.query("update api_keys set expires_at = now() - interval '1 minute' where id = $1", [ro.json.id]);
+  assert.equal((await reader.get("/findings")).status, 401);
+  for (const bad of [{ access: "admin" }, { expiresInDays: 0 }, { expiresInDays: 400 }, { expiresInDays: 1.5 }]) assert.equal((await c.post("/api-keys", { name: "x", ...bad })).status, 400, JSON.stringify(bad));
+});
+
 test("SSO handoff from Nexora", async () => {
   const base_ = { sub: "nx-user-1", email: "Person@Example.com", name: "Pat", org: "nx-org-1", orgName: "Acme" };
   const sso = (o: object = {}, secret = SSO, ttl = 120) => signJwt({ ...base_, jti: `jti-${Math.random()}-${Date.now()}`, ...o }, secret, ttl);

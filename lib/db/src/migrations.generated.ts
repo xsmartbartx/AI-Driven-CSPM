@@ -23,5 +23,9 @@ export const MIGRATIONS: { version: string; sql: string }[] = [
   {
     "version": "0006_asset_last_scan",
     "sql": "-- Which scan last saw an asset. Attack paths are built only from what the latest scan of an account actually found, so a\n-- resource that disappeared (or could not be read this time) stops appearing in paths at once, without any time window.\nalter table assets add column if not exists last_scan_id uuid references scans(id) on delete set null;\ncreate index if not exists assets_last_scan_idx on assets (last_scan_id);\n"
+  },
+  {
+    "version": "0007_api_key_scope",
+    "sql": "-- API keys get an access level and an optional expiry. Existing keys keep what they always had (analyst: run scans and\n-- read findings) and never expire; new keys can be read-only and time-limited.\nalter table api_keys add column if not exists role text not null default 'analyst';\nalter table api_keys add column if not exists expires_at timestamptz;\ndo $$ begin\n  alter table api_keys add constraint api_keys_role_check check (role in ('viewer', 'analyst'));\nexception when duplicate_object then null;\nend $$;\n"
   }
 ];

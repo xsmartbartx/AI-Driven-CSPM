@@ -133,9 +133,11 @@ export function Settings() {
   const keys = useApi<any>(can("admin") ? "/api-keys" : null);
   const [name, setName] = useState("");
   const [fresh, setFresh] = useState("");
+  const [access, setAccess] = useState("scan");
+  const [days, setDays] = useState("90");
   async function create(e: FormEvent) {
     e.preventDefault();
-    try { setFresh((await api<any>("POST", "/api-keys", { name })).key); setName(""); keys.reload(); } catch (x) { toast((x as ApiError).message); }
+    try { setFresh((await api<any>("POST", "/api-keys", { name, access, expiresInDays: days === "never" ? null : Number(days) })).key); setName(""); keys.reload(); } catch (x) { toast((x as ApiError).message); }
   }
   return (
     <>
@@ -164,13 +166,13 @@ export function Settings() {
       )}
       {can("admin") && (
         <section className="card" aria-labelledby="ak"><h2 className="h2" id="ak">API keys</h2>
-          <p className="muted" style={{ marginBottom: 12 }}>Keys can run scans and read findings. Send them as <code>Authorization: Bearer cspm_…</code>.</p>
-          <form className="row" onSubmit={create}><input className="input" style={{ maxWidth: 260 }} required maxLength={60} placeholder="Key name, e.g. CI pipeline" aria-label="Key name" value={name} onChange={(e) => setName(e.target.value)} /><button className="btn primary">Create key</button></form>
+          <p className="muted" style={{ marginBottom: 12 }}>A read-only key can read findings, assets and attack paths; a scan key can also run scans. Send them as <code>Authorization: Bearer cspm_…</code>.</p>
+          <form className="row" onSubmit={create}><input className="input" style={{ maxWidth: 260 }} required maxLength={60} placeholder="Key name, e.g. CI pipeline" aria-label="Key name" value={name} onChange={(e) => setName(e.target.value)} /><select className="input" style={{ maxWidth: 170 }} aria-label="Access" value={access} onChange={(e) => setAccess(e.target.value)}><option value="scan">Read and run scans</option><option value="read">Read only</option></select><select className="input" style={{ maxWidth: 140 }} aria-label="Expires" value={days} onChange={(e) => setDays(e.target.value)}><option value="30">Expires in 30 days</option><option value="90">Expires in 90 days</option><option value="365">Expires in 1 year</option><option value="never">Never expires</option></select><button className="btn primary">Create key</button></form>
           {fresh && <div className="banner" role="status" style={{ marginTop: 12 }}>Copy this key now. You will not be able to see it again.<pre className="code" style={{ marginTop: 8 }}>{fresh}</pre></div>}
           {keys.data && keys.data.items.length > 0 && (
             <div className="list" style={{ marginTop: 12 }}>{keys.data.items.map((k: any) => (
-              <div key={k.id} className="row" style={{ justifyContent: "space-between" }}><span><strong>{k.name}</strong> <code className="muted">{k.prefix}…</code></span>
-                <span className="row"><span className="muted">{k.lastUsedAt ? `used ${fmtDate(k.lastUsedAt)}` : "never used"}</span>
+              <div key={k.id} className="row" style={{ justifyContent: "space-between" }}><span><strong>{k.name}</strong> <code className="muted">{k.prefix}…</code> <span className="muted">{k.role === "viewer" ? "read only" : "read + scan"}</span></span>
+                <span className="row"><span className="muted">{k.expiresAt ? (new Date(k.expiresAt) < new Date() ? "expired" : `expires ${fmtDate(k.expiresAt)}`) : "no expiry"} · {k.lastUsedAt ? `used ${fmtDate(k.lastUsedAt)}` : "never used"}</span>
                   <button className="btn sm danger" onClick={async () => { if (confirm(`Revoke ${k.name}?`)) { await api("DELETE", `/api-keys/${k.id}`); keys.reload(); } }}>Revoke</button></span></div>))}</div>
           )}
         </section>

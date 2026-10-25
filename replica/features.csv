@@ -27,7 +27,7 @@ Kubernetes checks,integrations,could,no,no,phase 2
 Attack path analysis,attack-paths,could,no,partial,"built: internet -> server -> role -> account/bucket and server -> database; from pasted servers/roles or a connected AWS account (new role permissions); heuristic score, choke points; never run on real AWS; see replica/attack-paths.md"
 Executive PDF/CSV reports,reports,could,no,partial,CSV only
 Notifications (email Slack),notify,could,no,no,
-API keys and public REST API,api,should,partial,yes,orval pipeline exists
+API keys and public REST API,api,should,partial,yes,"read-only or scan keys with optional expiry (migration 0007); documented in replica/api.md; no generated OpenAPI spec yet"
 Terraform fix generation and PR,remediation,could,no,no,phase 3
 Internal admin portal,admin,could,no,no,separate surface
 Light and dark theme,design,should,no,yes,Apple-style tokens
