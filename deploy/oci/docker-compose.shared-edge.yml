@@ -1,0 +1,9 @@
+# Use this when the VM already runs a shared reverse proxy on 80/443 (the NEXORA host does: "edge-caddy").
+# This stack then publishes no ports and does not request certificates; the shared proxy terminates TLS and forwards
+# the three hostnames to the "web" container on port 80 (Host header preserved), which routes to the sites and the API.
+#   docker compose -p cspm -f docker-compose.yml -f docker-compose.shared-edge.yml up -d --build
+services:
+  web:
+    ports: !reset []
+    environment:
+      CADDY_GLOBAL_OPTIONS: auto_https off
