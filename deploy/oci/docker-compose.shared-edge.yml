@@ -5,5 +5,5 @@
 services:
   web:
     ports: !reset []
-    environment:
-      CADDY_GLOBAL_OPTIONS: auto_https off
+    volumes:
+      - ./Caddyfile.shared-edge:/etc/caddy/Caddyfile:ro
