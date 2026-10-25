@@ -31,10 +31,10 @@ function csrfOk(req: Request) {
 export async function loadAuth(req: Request): Promise<Auth | null> {
   const bearer = req.headers.authorization?.startsWith("Bearer ") ? req.headers.authorization.slice(7).trim() : "";
   if (bearer.startsWith("cspm_")) {
-    const { rows } = await req.db.query("select id, org_id from api_keys where key_hash = $1", [sha256(bearer)]);
+    const { rows } = await req.db.query("select id, org_id, role from api_keys where key_hash = $1 and (expires_at is null or expires_at > now())", [sha256(bearer)]);
     if (!rows[0]) return null;
     void req.db.query("update api_keys set last_used_at = now() where id = $1", [rows[0].id]).catch(() => {});
-    return { userId: null, orgId: rows[0].org_id, role: "analyst", email: null, via: "key" };
+    return { userId: null, orgId: rows[0].org_id, role: rows[0].role, email: null, via: "key" };
   }
   const token = (req.headers.cookie ?? "").split(/;\s*/).map((c) => c.split("=")).find(([k]) => k === COOKIE)?.[1];
   if (!token) return null;

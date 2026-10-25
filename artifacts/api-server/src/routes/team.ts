@@ -85,17 +85,21 @@ r.get("/audit", requireRole("admin"), async (req, res) => {
 });
 
 r.get("/api-keys", requireRole("admin"), async (req, res) => {
-  const { rows } = await req.db.query(`select id, name, prefix, last_used_at as "lastUsedAt", created_at as "createdAt" from api_keys where org_id = $1 order by created_at desc`, [req.auth!.orgId]);
+  const { rows } = await req.db.query(`select id, name, prefix, role, expires_at as "expiresAt", last_used_at as "lastUsedAt", created_at as "createdAt" from api_keys where org_id = $1 order by created_at desc`, [req.auth!.orgId]);
   res.json({ items: rows });
 });
 r.post("/api-keys", requireRole("admin"), async (req, res) => {
-  const b = parse(z.object({ name: z.string().trim().min(1).max(60) }), req.body);
+  const b = parse(z.object({
+    name: z.string().trim().min(1).max(60),
+    access: z.enum(["read", "scan"]).default("scan"),           // read = viewer (findings, assets, paths); scan = analyst (also runs scans)
+    expiresInDays: z.number().int().min(1).max(365).nullable().default(null),
+  }), req.body);
   const n = (await req.db.query("select count(*)::int as n from api_keys where org_id = $1", [req.auth!.orgId])).rows[0].n;
   if (n >= 10) throw bad("At most 10 API keys per organization", "too_many_keys");
   const key = `cspm_${randomToken(32)}`;
-  const { rows } = await req.db.query("insert into api_keys (org_id, name, key_hash, prefix) values ($1,$2,$3,$4) returning id", [req.auth!.orgId, b.name, sha256(key), key.slice(0, 10)]);
-  await audit(req, "apikey.created", b.name);
-  res.status(201).json({ id: rows[0].id, key }); // shown once
+  const { rows } = await req.db.query("insert into api_keys (org_id, name, key_hash, prefix, role, expires_at) values ($1,$2,$3,$4,$5, case when $6::int is null then null else now() + make_interval(days => $6::int) end) returning id, expires_at as \"expiresAt\"", [req.auth!.orgId, b.name, sha256(key), key.slice(0, 10), b.access === "read" ? "viewer" : "analyst", b.expiresInDays]);
+  await audit(req, "apikey.created", `${b.name} (${b.access}${b.expiresInDays ? `, ${b.expiresInDays} days` : ""})`);
+  res.status(201).json({ id: rows[0].id, key, access: b.access, expiresAt: rows[0].expiresAt }); // shown once
 });
 r.delete("/api-keys/:id", requireRole("admin"), async (req, res) => {
   await req.db.query("delete from api_keys where id = $1 and org_id = $2", [uuidParam(req.params["id"]), req.auth!.orgId]);
