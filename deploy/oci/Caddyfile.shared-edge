@@ -3,6 +3,9 @@
 # Hostnames come from the environment (see .env): SITE_HOST, APP_HOST, API_HOST.
 {
 	auto_https off
+	servers {
+		trusted_proxies static private_ranges   # the shared proxy in front keeps the real client address in X-Forwarded-For
+	}
 }
 
 (security) {
@@ -47,6 +50,6 @@ http://{$API_HOST} {
 		max_size 2MB
 	}
 	reverse_proxy api:8080 {
-		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-For {http.request.header.X-Forwarded-For}
 	}
 }
