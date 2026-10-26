@@ -3,6 +3,7 @@ import { complianceFrom, defaultCriticality, evaluate, parseInput, postureScore,
 import { PLANS, type PlanId } from "../config";
 import { bad, HttpError } from "../lib/errors";
 import type { Auth } from "../lib/context";
+import type { Alert } from "./notifications";
 
 const SEVS: Severity[] = ["critical", "high", "medium", "low"];
 export const period = (d = new Date()) => d.toISOString().slice(0, 7);
@@ -81,6 +82,7 @@ export async function runScan(db: { tx: <T>(fn: (q: Queryable) => Promise<T>) =>
     const exMap = new Map(existing.map((e) => [`${e.asset_id}/${e.rule_id}`, e]));
     const seen = new Set<string>();
     let created = 0, reopened = 0, persisting = 0, fixed = 0;
+    const alerts: Alert[] = []; // findings that are new or came back; the caller decides whether anyone is told
 
     for (const f of findings) {
       const aid = assetId.get(`${f.resourceType}/${f.resourceName}`)!;
@@ -99,13 +101,14 @@ export async function runScan(db: { tx: <T>(fn: (q: Queryable) => Promise<T>) =>
              first_seen_at = case when $10 then now() else first_seen_at end
            where id=$1`,
           [ex.id, scanId, f.title, f.severity, f.riskScore, JSON.stringify(f.evidence), f.remediation, f.frameworks, reopen, ex.status === "fixed"]);
-        reopen ? reopened++ : persisting++;
+        if (reopen) { reopened++; if (alerts.length < 200) alerts.push({ title: f.title, severity: f.severity, asset: f.resourceName, type: f.resourceType }); } else persisting++;
       } else {
         await q.query(
           `insert into findings (org_id, scan_id, asset_id, rule_id, title, severity, risk_score, evidence, remediation, frameworks)
            values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10::text[])`,
           [auth.orgId, scanId, aid, f.ruleId, f.title, f.severity, f.riskScore, JSON.stringify(f.evidence), f.remediation, f.frameworks]);
         created++;
+        if (alerts.length < 200) alerts.push({ title: f.title, severity: f.severity, asset: f.resourceName, type: f.resourceType });
       }
     }
     // findings on scanned assets that no longer trigger are fixed
@@ -131,7 +134,7 @@ export async function runScan(db: { tx: <T>(fn: (q: Queryable) => Promise<T>) =>
       `insert into risk_snapshots (org_id, day, score, critical, high, medium, low) values ($1, (now() at time zone 'utc')::date, $2,$3,$4,$5,$6)
        on conflict (org_id, day) do update set score=excluded.score, critical=excluded.critical, high=excluded.high, medium=excluded.medium, low=excluded.low`,
       [auth.orgId, score, c.critical, c.high, c.medium, c.low]);
-    return { id: scanId, resourceCount: resources.length, findingCount: findings.length, score, counts, unknownTypes };
+    return { id: scanId, resourceCount: resources.length, findingCount: findings.length, score, counts, unknownTypes, alerts };
   });
 }
 

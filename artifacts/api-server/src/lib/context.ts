@@ -8,6 +8,6 @@ export interface Auth { userId: string | null; orgId: string; role: Role; email:
 declare global {
   namespace Express {
     /** db is the privileged connection until requireRole() authenticates the request, then the caller's tenant-scoped view (RLS). */
-    interface Request { auth?: Auth; db: Db; sysDb: Db; mailer: Mailer; aws: AwsConnector; rawBody?: Buffer }
+    interface Request { auth?: Auth; db: Db; sysDb: Db; mailer: Mailer; aws: AwsConnector; notifyFetch?: typeof fetch; rawBody?: Buffer }
   }
 }

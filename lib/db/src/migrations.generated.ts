@@ -27,5 +27,9 @@ export const MIGRATIONS: { version: string; sql: string }[] = [
   {
     "version": "0007_api_key_scope",
     "sql": "-- API keys get an access level and an optional expiry. Existing keys keep what they always had (analyst: run scans and\n-- read findings) and never expire; new keys can be read-only and time-limited.\nalter table api_keys add column if not exists role text not null default 'analyst';\nalter table api_keys add column if not exists expires_at timestamptz;\ndo $$ begin\n  alter table api_keys add constraint api_keys_role_check check (role in ('viewer', 'analyst'));\nexception when duplicate_object then null;\nend $$;\n"
+  },
+  {
+    "version": "0008_notifications",
+    "sql": "-- Per-organization alert settings: email to owners and admins, and/or a Slack incoming webhook, when a scan finds new\n-- findings at or above a severity. The webhook URL is a secret: it is stored here (row level security applies) and is\n-- never returned by the API.\ncreate table if not exists notification_settings (\n  org_id uuid primary key references organizations(id) on delete cascade,\n  email_enabled boolean not null default false,\n  min_severity text not null default 'high' check (min_severity in ('critical', 'high')),\n  slack_webhook text,\n  last_sent_at timestamptz,\n  last_error text,\n  updated_at timestamptz not null default now()\n);\ngrant select, insert, update, delete on notification_settings to cspm_app;\nalter table notification_settings enable row level security;\ndrop policy if exists tenant_isolation on notification_settings;\ncreate policy tenant_isolation on notification_settings to cspm_app using (org_id = app_org()) with check (org_id = app_org());\n"
   }
 ];
