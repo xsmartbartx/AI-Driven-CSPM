@@ -41,7 +41,7 @@ export function createApp(db: Db, opts: { mailer?: Mailer; aws?: AwsConnector; f
     next();
   });
   // exact origins only, with credentials. Unlisted origins get no CORS headers.
-  app.use(cors({ origin: (o, cb) => cb(null, !o || config.origins.includes(o)), credentials: true, allowedHeaders: ["content-type", "x-csrf", "authorization"], methods: ["GET", "POST", "PATCH", "DELETE"] }));
+  app.use(cors({ origin: (o, cb) => cb(null, !o || config.origins.includes(o)), credentials: true, allowedHeaders: ["content-type", "x-csrf", "authorization"], methods: ["GET", "POST", "PUT", "PATCH", "DELETE"] }));
   app.use(express.json({ limit: "1mb", verify: (req, _res, buf) => { (req as Request).rawBody = buf; } }));
   app.use((req, res, next) => {
     req.db = db; req.sysDb = db; req.mailer = mailer; req.aws = aws; req.notifyFetch = opts.fetch;

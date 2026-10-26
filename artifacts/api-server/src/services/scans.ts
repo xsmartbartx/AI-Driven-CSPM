@@ -6,6 +6,7 @@ import type { Auth } from "../lib/context";
 import type { Alert } from "./notifications";
 
 const SEVS: Severity[] = ["critical", "high", "medium", "low"];
+const alertable = (s: Severity) => s === "critical" || s === "high"; // the only levels an alert can be set to; keeps the cap for what can be sent
 export const period = (d = new Date()) => d.toISOString().slice(0, 7);
 
 export async function openCounts(q: Queryable, orgId: string): Promise<Record<Severity, number>> {
@@ -101,14 +102,14 @@ export async function runScan(db: { tx: <T>(fn: (q: Queryable) => Promise<T>) =>
              first_seen_at = case when $10 then now() else first_seen_at end
            where id=$1`,
           [ex.id, scanId, f.title, f.severity, f.riskScore, JSON.stringify(f.evidence), f.remediation, f.frameworks, reopen, ex.status === "fixed"]);
-        if (reopen) { reopened++; if (alerts.length < 200) alerts.push({ title: f.title, severity: f.severity, asset: f.resourceName, type: f.resourceType }); } else persisting++;
+        if (reopen) { reopened++; if (alertable(f.severity) && alerts.length < 200) alerts.push({ title: f.title, severity: f.severity, asset: f.resourceName, type: f.resourceType }); } else persisting++;
       } else {
         await q.query(
           `insert into findings (org_id, scan_id, asset_id, rule_id, title, severity, risk_score, evidence, remediation, frameworks)
            values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10::text[])`,
           [auth.orgId, scanId, aid, f.ruleId, f.title, f.severity, f.riskScore, JSON.stringify(f.evidence), f.remediation, f.frameworks]);
         created++;
-        if (alerts.length < 200) alerts.push({ title: f.title, severity: f.severity, asset: f.resourceName, type: f.resourceType });
+        if (alertable(f.severity) && alerts.length < 200) alerts.push({ title: f.title, severity: f.severity, asset: f.resourceName, type: f.resourceType });
       }
     }
     // findings on scanned assets that no longer trigger are fixed
