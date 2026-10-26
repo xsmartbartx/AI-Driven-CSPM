@@ -5,6 +5,7 @@ import { parse, requireRole, uuidParam } from "../lib/http";
 import { demoScan, runScan, overview } from "../services/scans";
 import { notFound } from "../lib/errors";
 import { audit } from "../lib/audit";
+import { notifyScan } from "../services/notifications";
 
 const r = Router();
 const body = z.object({ config: z.unknown() });
@@ -14,8 +15,9 @@ r.post("/demo/scan", rateLimit("demo", 5, 3600_000), (req, res) => {
 });
 
 r.post("/scans", requireRole("analyst"), async (req, res) => {
-  const result = await runScan(req.db, req.auth!, parse(body, req.body).config);
+  const { alerts, ...result } = await runScan(req.db, req.auth!, parse(body, req.body).config);
   await audit(req, "scan.run", result.id);
+  void notifyScan({ db: req.sysDb, mailer: req.mailer, fetchImpl: req.notifyFetch }, req.auth!.orgId, alerts); // after the response is decided; never fails the scan
   res.status(201).json(result);
 });
 

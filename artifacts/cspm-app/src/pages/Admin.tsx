@@ -133,6 +133,12 @@ export function Settings() {
   const keys = useApi<any>(can("admin") ? "/api-keys" : null);
   const [name, setName] = useState("");
   const [fresh, setFresh] = useState("");
+  const notif = useApi<any>(can("admin") ? "/notifications" : null);
+  const [hook, setHook] = useState("");
+  const [testOut, setTestOut] = useState("");
+  async function saveNotif(patch: Record<string, unknown>) {
+    try { await api("PUT", "/notifications", patch); setHook(""); notif.reload(); toast("Saved"); } catch (x) { toast((x as ApiError).message); }
+  }
   const [access, setAccess] = useState("scan");
   const [days, setDays] = useState("90");
   async function create(e: FormEvent) {
@@ -163,6 +169,22 @@ export function Settings() {
             <div className="row" style={{ justifyContent: "flex-end" }}><button type="button" className="btn" onClick={() => setDel(false)}>Cancel</button><button className="btn danger">Delete permanently</button></div>
           </form>
         </Dialog>
+      )}
+      {can("admin") && notif.data && (
+        <section className="card" aria-labelledby="nt"><h2 className="h2" id="nt">Notifications</h2>
+          <p className="muted" style={{ marginBottom: 12 }}>Get told when a scan finds new findings. Email goes to the organization's owners and admins; Slack needs an incoming webhook.</p>
+          <div className="list">
+            <label className="row"><input type="checkbox" checked={notif.data.emailEnabled} onChange={(e) => saveNotif({ emailEnabled: e.target.checked })} /> Email owners and admins</label>
+            <label className="row">Alert on <select className="input" style={{ maxWidth: 200 }} value={notif.data.minSeverity} onChange={(e) => saveNotif({ minSeverity: e.target.value })}><option value="high">Critical and high</option><option value="critical">Critical only</option></select></label>
+            <form className="row" onSubmit={(e) => { e.preventDefault(); saveNotif({ slackWebhook: hook }); }}>
+              <input className="input" style={{ maxWidth: 360 }} type="password" autoComplete="off" aria-label="Slack webhook URL" placeholder={notif.data.slackConfigured ? "Slack webhook saved (paste a new URL to replace)" : "https://hooks.slack.com/services/…"} value={hook} onChange={(e) => setHook(e.target.value)} />
+              <button className="btn" disabled={!hook}>Save Slack</button>
+              {notif.data.slackConfigured && <button type="button" className="btn danger" onClick={() => saveNotif({ slackWebhook: null })}>Remove</button>}
+            </form>
+            <div className="row"><button className="btn" onClick={async () => { try { const o = await api<any>("POST", "/notifications/test"); setTestOut(`Email: ${o.email}. Slack: ${o.slack}.`); } catch (x) { setTestOut((x as ApiError).message); } }}>Send a test</button>
+              <span className="muted" role="status">{testOut || (notif.data.lastError ? `Last problem: ${notif.data.lastError}` : notif.data.lastSentAt ? `Last alert sent ${fmtDate(notif.data.lastSentAt)}` : "")}</span></div>
+          </div>
+        </section>
       )}
       {can("admin") && (
         <section className="card" aria-labelledby="ak"><h2 className="h2" id="ak">API keys</h2>

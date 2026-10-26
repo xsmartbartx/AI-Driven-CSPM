@@ -42,3 +42,11 @@ export const scheduledScanStoppedEmail = (to: string, orgName: string, account: 
     [`NEXORA stopped the automatic scans of AWS account ${account} for ${orgName}: ${reason}`, "Nothing else changed: your existing findings are still there, and you can still scan by hand."],
     { label: "Open cloud accounts", url: `${base()}/integrations` },
     "To start automatic scans again, fix the cause, press Verify connection, then choose Daily or Weekly.");
+
+export const securityAlertEmail = (to: string, orgName: string, alerts: { title: string; severity: string; asset: string }[], listed: number): Mail =>
+  layout(to, `${alerts.length} new ${alerts.length === 1 ? "finding" : "findings"} for ${orgName}`,
+    [`A scan found ${alerts.length} new ${alerts.length === 1 ? "finding" : "findings"} for ${orgName}.`,
+      ...alerts.slice(0, listed).map((a) => `${a.severity.toUpperCase()}: ${a.title} (${a.asset})`),
+      ...(alerts.length > listed ? [`…and ${alerts.length - listed} more.`] : [])],
+    { label: "Open findings", url: `${base()}/findings` },
+    "You get this because you are an owner or admin and alerts are on. Change it under Settings, Notifications.");

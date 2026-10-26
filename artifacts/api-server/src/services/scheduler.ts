@@ -6,6 +6,7 @@ import { logger } from "../lib/logger";
 import type { Mailer } from "./mail";
 import { scheduledScanStoppedEmail } from "./mail-templates";
 import { scanConnection, type Conn } from "./aws/scan";
+import { notifyScan } from "./notifications";
 import type { AwsConnector } from "./aws/types";
 
 export interface SchedulerDeps { db: Db; aws: AwsConnector; mailer: Mailer }
@@ -49,6 +50,7 @@ async function runOne(d: SchedulerDeps, row: Due): Promise<"scanned" | "failed" 
   const label = `${row.accountId}/${row.region}`;
   try {
     const res = await scanConnection(db, d.aws, auth, row);
+    void notifyScan({ db: d.db, mailer: d.mailer }, row.orgId, res.alerts);
     await db.query(
       `update cloud_accounts set failure_count = 0, last_scheduled_at = now(), next_run_at = now() + interval '${INTERVAL[row.schedule]}' + make_interval(secs => $2), updated_at = now() where id = $1`,
       [row.id, jitter()]);

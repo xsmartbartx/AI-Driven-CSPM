@@ -8,6 +8,7 @@ import { rateLimit } from "../lib/ratelimit";
 import { ROLE_RANK } from "../lib/context";
 import { cloudFormationTemplate, DEFAULT_ROLE_NAME, isAccountId, isRoleName, READ_ONLY_ACTIONS, roleArnFor } from "../services/aws/setup";
 import { AwsError, REGIONS } from "../services/aws/types";
+import { notifyScan } from "../services/notifications";
 import { awsToHttp, scanConnection, target } from "../services/aws/scan";
 
 const r = Router();
@@ -79,8 +80,9 @@ r.post("/cloud-accounts/:id/verify", requireRole("admin"), rateLimit("aws-verify
 
 r.post("/cloud-accounts/:id/scan", requireRole("analyst"), rateLimit("aws-scan", 12, 3600_000, byOrg), async (req, res) => {
   const row = await load(req);
-  const out = await scanConnection(req.db, req.aws, req.auth!, row);
+  const { alerts, ...out } = await scanConnection(req.db, req.aws, req.auth!, row);
   await audit(req, "cloud.scan", `${row.accountId}/${row.region}`);
+  void notifyScan({ db: req.sysDb, mailer: req.mailer, fetchImpl: req.notifyFetch }, req.auth!.orgId, alerts);
   res.status(201).json(out);
 });
 
