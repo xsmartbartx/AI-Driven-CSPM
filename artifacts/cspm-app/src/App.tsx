@@ -10,6 +10,7 @@ import { Audit, Settings, Team, Usage } from "./pages/Admin";
 import { Planned } from "./pages/Planned";
 import { Cloud } from "./pages/Cloud";
 import { AttackPaths } from "./pages/Paths";
+import { Report } from "./pages/Report";
 import { AuthPage, ForgotPasswordPage, InvitePage, ResetPasswordPage, VerifyEmailPage } from "./pages/Auth";
 
 export type Role = "owner" | "admin" | "analyst" | "viewer";
@@ -33,6 +34,7 @@ const NAV: { h?: string; to: string; label: string; icon: keyof typeof ICONS; mi
   { to: "/assets", label: "Assets", icon: "box" },
   { to: "/compliance", label: "Compliance", icon: "check" },
   { to: "/attack-paths", label: "Attack paths", icon: "path" },
+  { to: "/report", label: "Report", icon: "log" },
   { h: "Scans", to: "/scans/new", label: "New scan", icon: "scan", min: "analyst" },
   { to: "/integrations", label: "Cloud accounts", icon: "plug" },
   { to: "/scans", label: "Scan history", icon: "history" },
@@ -139,6 +141,7 @@ export function App() {
                   <Route path="/compliance" component={Compliance} />
                   <Route path="/integrations" component={Cloud} />
                   <Route path="/attack-paths" component={AttackPaths} />
+                  <Route path="/report" component={Report} />
                   <Route path="/usage" component={Usage} />
                   <Route path="/team" component={Team} />
                   <Route path="/audit" component={Audit} />

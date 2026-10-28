@@ -1,0 +1,65 @@
+import { Link } from "wouter";
+import { apiUrl, useApi } from "../api";
+import { useMe } from "../App";
+import { Empty, ErrorBox, fmtDate, Kpi, ScoreRing, Sev, Skeleton, Trend } from "../ui";
+
+/** A one-page summary for people who will not open the dashboard. "Print or save as PDF" uses the browser, so it needs no extra service. */
+export function Report() {
+  const { me, can } = useMe();
+  const ov = useApi<any>("/overview?range=30d");
+  const fi = useApi<any>("/findings?status=open&sort=risk&pageSize=10");
+  const ap = useApi<any>("/attack-paths");
+  const error = ov.error ?? fi.error ?? ap.error;
+  const loading = !ov.data || !fi.data || !ap.data;
+  const o = ov.data;
+  const ready = !error && !!o?.hasData && !!fi.data && !!ap.data; // nothing to print until all three parts are loaded
+
+  return (
+    <div className="report">
+      <div className="page-h">
+        <div><h1>Security report</h1><p>{me.org.name} · {fmtDate(new Date())}</p></div>
+        <div className="row no-print"><button className="btn primary" disabled={!ready} onClick={() => window.print()}>Print or save as PDF</button><a className="btn" href={apiUrl("/reports/summary.csv")}>Findings CSV</a></div>
+      </div>
+      {error && <ErrorBox error={error} retry={() => { ov.reload(); fi.reload(); ap.reload(); }} />}
+      {!error && loading && <div className="card"><Skeleton lines={8} h={20} /></div>}
+      {o && !o.hasData && (
+        <Empty title="Nothing to report yet" action={can("analyst") ? <Link href="/scans/new" className="btn primary">Run a scan</Link> : undefined}>A report summarises your latest scan. {can("analyst") ? "Run one first." : "Ask an analyst or admin in your organization to run one."}</Empty>
+      )}
+      {o?.hasData && fi.data && ap.data && (
+        <>
+          <section className="grid g4" aria-label="Summary">
+            <div className="card row" style={{ flexWrap: "nowrap" }}><ScoreRing score={o.score} /><div className="kpi"><div className="label">Posture score</div><div className="sub">{o.delta == null ? "First period" : `${o.delta >= 0 ? "Up" : "Down"} ${Math.abs(o.delta)} in 30 days`}</div></div></div>
+            <Kpi label="Open findings" value={o.openTotal} sub={`${o.counts.critical} critical · ${o.counts.high} high · ${o.counts.medium} medium · ${o.counts.low} low`} />
+            <Kpi label="Assets scanned" value={o.assets.total} sub={o.lastScan ? `Last scan ${fmtDate(o.lastScan.createdAt)}` : undefined} />
+            <Kpi label="Attack paths" value={ap.data.paths.length} sub={ap.data.paths.length ? `Highest risk ${ap.data.paths[0].score}/100` : "None found"} />
+          </section>
+
+          {o.trend.length > 1 && <section className="card" aria-labelledby="r-trend"><h2 className="h2" id="r-trend">Score over the last 30 days</h2><Trend points={o.trend} /></section>}
+
+          <section className="card" aria-labelledby="r-top"><h2 className="h2" id="r-top">Top open findings</h2>
+            {fi.data.items.length === 0 ? <p className="muted">No open findings.</p> : (
+              <table className="tbl"><thead><tr><th scope="col">Severity</th><th scope="col">Finding</th><th scope="col">Asset</th><th scope="col">Risk</th></tr></thead>
+                <tbody>{fi.data.items.map((f: any) => <tr key={f.id}><td><Sev s={f.severity} /></td><td>{f.title}</td><td>{f.assetName}</td><td>{f.riskScore}</td></tr>)}</tbody></table>
+            )}
+            {fi.data.total > fi.data.items.length && <p className="muted" style={{ marginTop: 8 }}>Showing the {fi.data.items.length} highest of {fi.data.total} open findings.</p>}
+          </section>
+
+          {ap.data.paths.length > 0 && (
+            <section className="card" aria-labelledby="r-paths"><h2 className="h2" id="r-paths">Attack paths</h2>
+              <ol className="list" style={{ paddingLeft: 20 }}>{ap.data.paths.slice(0, 3).map((p: any) => <li key={p.id}><strong>{p.title}</strong> <span className="muted">· risk {p.score}/100 · {p.nodes.map((n: any) => n.name).join(" → ")}</span></li>)}</ol>
+              {ap.data.chokePoints[0] && <p style={{ marginTop: 8 }}>Best single fix: <strong>{ap.data.chokePoints[0].action}</strong> on {ap.data.chokePoints[0].asset}, which breaks {ap.data.chokePoints[0].paths} of {ap.data.paths.length} {ap.data.paths.length === 1 ? "path" : "paths"}.</p>}
+            </section>
+          )}
+
+          <section className="card" aria-labelledby="r-comp"><h2 className="h2" id="r-comp">Compliance coverage</h2>
+            <table className="tbl"><thead><tr><th scope="col">Framework</th><th scope="col">Mapped controls passing</th><th scope="col">Coverage</th></tr></thead>
+              <tbody>{o.compliance.frameworks.map((f: any) => <tr key={f.framework}><td>{f.framework}</td><td>{f.controls - f.failed} of {f.controls}</td><td>{f.coverage}%</td></tr>)}</tbody></table>
+            <p className="muted" style={{ marginTop: 8 }}>Indicative mapping of the checks NEXORA runs. This is not a full audit against any framework.</p>
+          </section>
+
+          <p className="muted">Generated by NEXORA CSPM from the scans in your organization. It covers only what was scanned, and findings reflect the configuration at scan time.</p>
+        </>
+      )}
+    </div>
+  );
+}
