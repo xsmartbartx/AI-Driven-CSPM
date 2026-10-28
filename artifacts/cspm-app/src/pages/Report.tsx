@@ -5,24 +5,25 @@ import { Empty, ErrorBox, fmtDate, Kpi, ScoreRing, Sev, Skeleton, Trend } from "
 
 /** A one-page summary for people who will not open the dashboard. "Print or save as PDF" uses the browser, so it needs no extra service. */
 export function Report() {
-  const { me } = useMe();
+  const { me, can } = useMe();
   const ov = useApi<any>("/overview?range=30d");
   const fi = useApi<any>("/findings?status=open&sort=risk&pageSize=10");
   const ap = useApi<any>("/attack-paths");
   const error = ov.error ?? fi.error ?? ap.error;
   const loading = !ov.data || !fi.data || !ap.data;
   const o = ov.data;
+  const ready = !error && !!o?.hasData && !!fi.data && !!ap.data; // nothing to print until all three parts are loaded
 
   return (
     <div className="report">
       <div className="page-h">
         <div><h1>Security report</h1><p>{me.org.name} · {fmtDate(new Date())}</p></div>
-        <div className="row no-print"><button className="btn primary" onClick={() => window.print()}>Print or save as PDF</button><a className="btn" href={apiUrl("/reports/summary.csv")}>Findings CSV</a></div>
+        <div className="row no-print"><button className="btn primary" disabled={!ready} onClick={() => window.print()}>Print or save as PDF</button><a className="btn" href={apiUrl("/reports/summary.csv")}>Findings CSV</a></div>
       </div>
       {error && <ErrorBox error={error} retry={() => { ov.reload(); fi.reload(); ap.reload(); }} />}
       {!error && loading && <div className="card"><Skeleton lines={8} h={20} /></div>}
       {o && !o.hasData && (
-        <Empty title="Nothing to report yet" action={<Link href="/scans/new" className="btn primary">Run a scan</Link>}>A report summarises your latest scan. Run one first.</Empty>
+        <Empty title="Nothing to report yet" action={can("analyst") ? <Link href="/scans/new" className="btn primary">Run a scan</Link> : undefined}>A report summarises your latest scan. {can("analyst") ? "Run one first." : "Ask an analyst or admin in your organization to run one."}</Empty>
       )}
       {o?.hasData && fi.data && ap.data && (
         <>

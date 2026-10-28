@@ -439,6 +439,7 @@ test.describe("F12 executive report", () => {
     await signUp(page);
     await page.getByRole("link", { name: "Report" }).click();
     await expect(page.getByRole("heading", { name: "Nothing to report yet" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Print or save as PDF" })).toBeDisabled(); // nothing to print yet
     await a11y(page, "report empty");
   });
 
@@ -457,7 +458,9 @@ test.describe("F12 executive report", () => {
     await expect(page.getByText("This is not a full audit")).toBeVisible();
     await a11y(page, "report");
     // printing hides the navigation and the buttons
-    await page.emulateMedia({ media: "print" });
+    await page.emulateMedia({ media: "print", colorScheme: "dark" }); // a dark screen still prints on white
+    expect(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--bg").trim())).toBe("#ffffff");
+    expect(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--text").trim())).toBe("#15181d");
     await expect(page.getByRole("button", { name: "Print or save as PDF" })).toBeHidden();
     await expect(page.getByRole("navigation", { name: "Main navigation" })).toBeHidden();
     await expect(page.getByRole("heading", { name: "Security report", level: 1 })).toBeVisible();

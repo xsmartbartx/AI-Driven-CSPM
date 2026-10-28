@@ -86,6 +86,8 @@ pre.code{margin:0;background:var(--surface);border:1px solid var(--border);borde
 
 /* Print / save as PDF: only the report content, on white, without navigation or buttons */
 @media print{
+  /* always print on white with light-theme colours, whatever theme the screen uses */
+  html:root:root:root{--bg:#ffffff;--surface:#f5f6f8;--surface-2:#eceef2;--border:#dfe3e8;--text:#15181d;--text-muted:#4f5864;--accent:#0b6a88;--on-accent:#ffffff;--danger:#b42318;--success:#1a7248;--warning:#8a5a00;color-scheme:light}
   .side,.top,.no-print,.menu-btn,.banner{display:none!important}
   .app{display:block}.main{margin:0;padding:0}.content{padding:0;max-width:none}
   body{background:#fff;color:#000}
