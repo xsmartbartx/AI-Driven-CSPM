@@ -25,7 +25,7 @@ AWS read-only account connection (role + external ID),integrations,should,roadma
 Azure and GCP connectors,integrations,could,no,no,phase 2
 Kubernetes checks,integrations,could,no,no,phase 2
 Attack path analysis,attack-paths,could,no,partial,"built: internet -> server -> role -> account/bucket and server -> database; from pasted servers/roles or a connected AWS account (new role permissions); heuristic score, choke points; never run on real AWS; see replica/attack-paths.md"
-Executive PDF/CSV reports,reports,could,no,partial,CSV only
+Executive PDF/CSV reports,reports,could,no,yes,"Report page (score, trend, top findings, attack paths, compliance) with print / save as PDF via the browser, plus the findings CSV; no scheduled or emailed reports"
 Notifications (email Slack),notify,could,no,partial,"built: new critical/high findings alert owners and admins by email and/or a Slack webhook after any scan (migration 0008); see replica/notifications.md; email needs the mail provider live"
 API keys and public REST API,api,should,partial,yes,"read-only or scan keys with optional expiry (migration 0007); documented in replica/api.md; no generated OpenAPI spec yet"
 Terraform fix generation and PR,remediation,could,no,no,phase 3

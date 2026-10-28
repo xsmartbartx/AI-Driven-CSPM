@@ -83,3 +83,13 @@ pre.code{margin:0;background:var(--surface);border:1px solid var(--border);borde
 .hop.account,.hop.database,.hop.bucket{border-color:var(--sev-high)}
 .hop.account{border-color:var(--sev-critical);border-width:2px}
 @media (max-width:600px){.chain{flex-direction:column}.hop{margin-right:0;margin-bottom:22px;max-width:none}.hop-arrow{right:auto;left:50%;top:auto;bottom:-24px;transform:translateX(-50%) rotate(90deg)}}
+
+/* Print / save as PDF: only the report content, on white, without navigation or buttons */
+@media print{
+  .side,.top,.no-print,.menu-btn,.banner{display:none!important}
+  .app{display:block}.main{margin:0;padding:0}.content{padding:0;max-width:none}
+  body{background:#fff;color:#000}
+  .card{box-shadow:none;border:1px solid #cfd4da;break-inside:avoid;margin-bottom:12px}
+  .report h1{font-size:24px}
+  a{color:inherit;text-decoration:none}
+}

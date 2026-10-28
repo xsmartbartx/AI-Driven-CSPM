@@ -434,6 +434,36 @@ test.describe("F11 attack paths", () => {
   });
 });
 
+test.describe("F12 executive report", () => {
+  test("F12-E1 before any scan the report says there is nothing to report", async ({ page }) => {
+    await signUp(page);
+    await page.getByRole("link", { name: "Report" }).click();
+    await expect(page.getByRole("heading", { name: "Nothing to report yet" })).toBeVisible();
+    await a11y(page, "report empty");
+  });
+
+  test("F12-H1 after a scan the report summarises score, top findings, attack paths and compliance, and can be printed", async ({ page }) => {
+    await signUp(page);
+    await page.goto("/scans/new?sample=paths");
+    await page.getByRole("button", { name: "Run scan" }).click();
+    await expect(page.getByRole("heading", { name: "Scan result" })).toBeVisible();
+    await page.getByRole("link", { name: "Report" }).click();
+    await expect(page.getByRole("heading", { name: "Security report", level: 1 })).toBeVisible();
+    await expect(page.locator(".kpi").filter({ hasText: "Open findings" }).locator(".value")).not.toHaveText("0");
+    await expect(page.getByRole("heading", { name: "Top open findings" })).toBeVisible();
+    await expect(page.getByRole("table").first().getByRole("row")).not.toHaveCount(1);
+    await expect(page.locator(".kpi").filter({ hasText: "Attack paths" }).locator(".value")).toHaveText("2");
+    await expect(page.getByRole("heading", { name: "Compliance coverage" })).toBeVisible();
+    await expect(page.getByText("This is not a full audit")).toBeVisible();
+    await a11y(page, "report");
+    // printing hides the navigation and the buttons
+    await page.emulateMedia({ media: "print" });
+    await expect(page.getByRole("button", { name: "Print or save as PDF" })).toBeHidden();
+    await expect(page.getByRole("navigation", { name: "Main navigation" })).toBeHidden();
+    await expect(page.getByRole("heading", { name: "Security report", level: 1 })).toBeVisible();
+  });
+});
+
 test.describe("F07 cloud accounts (the e2e API uses a fake AWS)", () => {
   // a short screen: the setup dialog is taller than this, so its buttons must be reachable by scrolling
   test.use({ viewport: { width: 1100, height: 560 } });
