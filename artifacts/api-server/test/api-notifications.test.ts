@@ -131,8 +131,11 @@ test("a flood of low-severity findings does not push a critical one out of the a
   reset();
   const { c } = await signup();
   await c.put("/notifications", { slackWebhook: HOOK, minSeverity: "high" });
-  const plain = Array.from({ length: 250 }, (_, i) => ({ type: "s3_bucket", name: `plain-${String(i).padStart(3, "0")}`, encryption: true, public_read: false, versioning: true }));
-  const config = [...plain.map((b) => ({ ...b, encryption: false })), { type: "s3_bucket", name: "zz-public-last", encryption: true, public_read: true }];
+  const plain = Array.from({ length: 250 }, (_, i) => ({ type: "iam_policy", name: `wide-${String(i).padStart(3, "0")}`, statements: [{ effect: "Allow", actions: ["s3:GetObject"], resources: ["*"] }] })); // each gives one medium finding
+  const config = [...plain, { type: "s3_bucket", name: "zz-public-last", encrypted: true, public_read: true }];
+  const first = (await c.post("/scans", { config: [plain[0]] })).json; // sanity: these really are findings, and not alertable ones
+  assert.equal(first.findingCount, 1); assert.equal(first.counts.open.medium, 1);
+  reset();
   assert.equal((await c.post("/scans", { config })).status, 201);
   await waitFor(() => slack.length > 0);
   assert.match(slack[0]!.body.text, /zz-public-last/);

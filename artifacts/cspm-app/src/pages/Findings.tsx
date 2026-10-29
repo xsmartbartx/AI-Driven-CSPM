@@ -95,6 +95,7 @@ export function FindingDetail({ id }: { id: string }) {
   const { can, toast } = useMe();
   const { data: f, error, loading, reload } = useApi<any>(`/findings/${id}`);
   const [dlg, setDlg] = useState<null | "accepted" | "false_positive">(null);
+  const [sup, setSup] = useState(false);
   const [busy, setBusy] = useState(false);
   const [aiErr, setAiErr] = useState("");
   const [brief, setBrief] = useState<any>(null);
@@ -128,6 +129,7 @@ export function FindingDetail({ id }: { id: string }) {
               <>
                 <button className="btn" onClick={() => setDlg("accepted")}>Accept risk</button>
                 <button className="btn" onClick={() => setDlg("false_positive")}>Mark false positive</button>
+                {can("admin") && <button className="btn" onClick={() => setSup(true)}>Suppress this rule…</button>}
               </>
             ) : <button className="btn" onClick={() => setStatus({ status: "open" }).catch((e) => toast((e as ApiError).message))}>Reopen</button>}
           </div>
@@ -135,7 +137,9 @@ export function FindingDetail({ id }: { id: string }) {
       </div>
 
       {f.status === "accepted" && <div className="banner">Accepted until {fmtDate(f.acceptedUntil)}. Reason: {f.statusReason}</div>}
-      {f.status === "false_positive" && <div className="banner">Marked as a false positive. Reason: {f.statusReason}</div>}
+      {f.status === "false_positive" && (f.suppressionId
+        ? <div className="banner">{f.statusReason}. This finding is hidden by a rule suppression and does not count toward your score.{can("admin") && <> <Link href="/settings">Manage suppressions</Link></>}</div>
+        : <div className="banner">Marked as a false positive. Reason: {f.statusReason}</div>)}
       {f.status === "fixed" && <div className="banner">This finding no longer appears in your latest scan, so it is marked fixed.</div>}
 
       <div className="grid g21">
@@ -173,7 +177,38 @@ export function FindingDetail({ id }: { id: string }) {
         </aside>
       </div>
       {dlg && <StatusDialog kind={dlg} onClose={() => setDlg(null)} onSubmit={setStatus} />}
+      {sup && <SuppressDialog f={f} onClose={() => setSup(false)} onDone={(n) => { setSup(false); toast(`Suppressed ${n} ${n === 1 ? "finding" : "findings"}`); reload(); }} />}
     </>
+  );
+}
+
+function SuppressDialog({ f, onClose, onDone }: { f: any; onClose: () => void; onDone: (n: number) => void }) {
+  const [scope, setScope] = useState<"asset" | "environment" | "all">("asset");
+  const [reason, setReason] = useState("");
+  const [days, setDays] = useState("90");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function go(e: FormEvent) {
+    e.preventDefault(); setErr(""); setBusy(true);
+    try {
+      const r = await api<any>("POST", "/suppressions", { ruleId: f.ruleId, reason, assetId: scope === "asset" ? f.assetId : undefined, environment: scope === "environment" ? f.environment : undefined, expiresInDays: days === "never" ? null : Number(days) });
+      onDone(r.suppressed);
+    } catch (x) { setErr((x as ApiError).message); } finally { setBusy(false); }
+  }
+  return (
+    <Dialog title="Suppress this rule" onClose={onClose}>
+      <form onSubmit={go} style={{ display: "grid", gap: 16 }}>
+        <p className="muted">Matching findings stop counting toward your score, compliance view and alerts. They come back if you remove the suppression or it expires.</p>
+        <fieldset className="field" style={{ border: 0, padding: 0 }}><legend>Applies to</legend>
+          {([["asset", `Only ${f.assetName}`], ["environment", `All ${f.environment} assets`], ["all", "Every asset"]] as const).map(([k, l]) => (
+            <label key={k} className="row"><input type="radio" name="scope" checked={scope === k} onChange={() => setScope(k)} /> {l}</label>))}
+        </fieldset>
+        <label className="field">Reason<textarea className="textarea" style={{ fontFamily: "var(--font-sans)" }} rows={3} required minLength={5} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+        <label className="field">Expires<select className="input" value={days} onChange={(e) => setDays(e.target.value)}><option value="30">In 30 days</option><option value="90">In 90 days</option><option value="365">In 1 year</option><option value="never">Never</option></select></label>
+        {err && <div className="err" role="alert">{err}</div>}
+        <div className="row" style={{ justifyContent: "flex-end" }}><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy}>Suppress</button></div>
+      </form>
+    </Dialog>
   );
 }
 

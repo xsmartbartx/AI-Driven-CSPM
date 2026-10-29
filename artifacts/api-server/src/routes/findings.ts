@@ -36,7 +36,7 @@ r.get("/findings", requireRole("viewer"), async (req, res) => {
 r.get("/findings/:id", requireRole("viewer"), async (req, res) => {
   const id = uuidParam(req.params["id"]);
   const { rows } = await req.db.query(
-    `select ${COLS}, f.evidence, f.remediation, f.frameworks, f.status_reason as "statusReason", f.accepted_until as "acceptedUntil", a.id as "assetId", a.criticality, a.owner
+    `select ${COLS}, f.evidence, f.remediation, f.frameworks, f.status_reason as "statusReason", f.accepted_until as "acceptedUntil", f.suppression_id as "suppressionId", a.id as "assetId", a.criticality, a.owner
      from findings f join assets a on a.id = f.asset_id where f.id = $1 and f.org_id = $2`, [id, req.auth!.orgId]);
   if (!rows[0]) throw notFound("Finding not found");
   const brief = await req.db.query("select content, model, created_at as \"createdAt\" from ai_briefs where finding_id = $1 and org_id = $2 and kind = 'finding' order by created_at desc limit 1", [id, req.auth!.orgId]);
@@ -57,7 +57,7 @@ r.patch("/findings/:id", requireRole("analyst"), async (req, res) => {
     if (+until - Date.now() > 366 * 86400_000) throw bad("Accepted risk can last at most one year", "expiry_too_long");
   }
   const { rows } = await req.db.query(
-    `update findings set status=$3, status_reason=$4, accepted_until=$5, updated_at=now() where id=$1 and org_id=$2 and status <> 'fixed' returning id`,
+    `update findings set status=$3, status_reason=$4, accepted_until=$5, suppression_id=null, updated_at=now() where id=$1 and org_id=$2 and status <> 'fixed' returning id`,
     [id, req.auth!.orgId, b.status, b.status === "open" ? null : b.reason, until]);
   if (!rows[0]) throw notFound("Finding not found, or already fixed");
   await audit(req, `finding.${b.status}`, id);
