@@ -6,6 +6,7 @@ import { demoScan, runScan, overview } from "../services/scans";
 import { notFound } from "../lib/errors";
 import { audit } from "../lib/audit";
 import { notifyScan } from "../services/notifications";
+import { refreshSuppressions } from "../services/suppressions";
 
 const r = Router();
 const body = z.object({ config: z.unknown() });
@@ -40,6 +41,7 @@ r.get("/scans/:id", requireRole("viewer"), async (req, res) => {
 });
 
 r.get("/overview", requireRole("viewer"), async (req, res) => {
+  await refreshSuppressions(req.db, req.auth!.orgId);
   const days = ({ "30d": 30, "3m": 90, "6m": 180 } as Record<string, number>)[String(req.query["range"] ?? "30d")] ?? 30;
   res.json(await overview(req.db, req.auth!.orgId, days));
 });

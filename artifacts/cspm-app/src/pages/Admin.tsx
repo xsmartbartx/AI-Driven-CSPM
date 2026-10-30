@@ -133,7 +133,8 @@ export function Settings() {
   const keys = useApi<any>(can("admin") ? "/api-keys" : null);
   const [name, setName] = useState("");
   const [fresh, setFresh] = useState("");
-  const sups = useApi<any>(can("admin") ? "/suppressions" : null);
+  const sups = useApi<any>(can("analyst") ? "/suppressions" : null);
+  const [removing, setRemoving] = useState<string | null>(null);
   const notif = useApi<any>(can("admin") ? "/notifications" : null);
   const [hook, setHook] = useState("");
   const [testOut, setTestOut] = useState("");
@@ -171,14 +172,19 @@ export function Settings() {
           </form>
         </Dialog>
       )}
-      {can("admin") && sups.data && (
+      {can("analyst") && sups.error && <ErrorBox error={sups.error} retry={sups.reload} />}
+      {can("analyst") && sups.data && (
         <section className="card" aria-labelledby="sp"><h2 className="h2" id="sp">Suppressed rules</h2>
           {sups.data.items.length === 0
-            ? <p className="muted">None. Open a finding and choose "Suppress this rule" to stop a rule from counting for an asset, an environment, or everything.</p>
+            ? <p className="muted">None.{can("admin") && " Open a finding and choose \"Suppress this rule\" to stop a rule from counting for an asset, an environment, or everything."}</p>
             : <div className="list">{sups.data.items.map((s: any) => (
                 <div key={s.id} className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
                   <span><strong>{s.ruleTitle}</strong> <span className="muted">· {s.assetName ? s.assetName : s.environment ? `all ${s.environment} assets` : "every asset"} · {s.suppressed} {s.suppressed === 1 ? "finding" : "findings"} · {s.expiresAt ? `until ${fmtDate(s.expiresAt)}` : "no expiry"}</span><br /><span className="muted">{s.reason}</span></span>
-                  <button className="btn sm danger" onClick={async () => { if (confirm(`Remove this suppression? ${s.suppressed} suppressed finding(s) will reopen.`)) { await api("DELETE", `/suppressions/${s.id}`); sups.reload(); toast("Suppression removed"); } }}>Remove</button>
+                  {can("admin") && <button className="btn sm danger" disabled={removing === s.id} onClick={async () => {
+                    if (!confirm(`Remove this suppression? Up to ${s.suppressed} suppressed finding(s) will reopen.`)) return;
+                    setRemoving(s.id);
+                    try { await api("DELETE", `/suppressions/${s.id}`); toast("Suppression removed"); } catch (x) { toast((x as ApiError).message); } finally { setRemoving(null); sups.reload(); }
+                  }}>Remove</button>}
                 </div>))}</div>}
         </section>
       )}

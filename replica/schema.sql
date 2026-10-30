@@ -351,6 +351,8 @@ create table if not exists suppressions (
 );
 create index if not exists suppressions_org_idx on suppressions (org_id);
 alter table findings add column if not exists suppression_id uuid references suppressions(id) on delete set null;
+-- set when someone reopens a suppressed finding by hand: that finding is left alone by suppressions until it is fixed
+alter table findings add column if not exists suppress_exempt boolean not null default false;
 grant select, insert, update, delete on suppressions to cspm_app;
 alter table suppressions enable row level security;
 drop policy if exists tenant_isolation on suppressions;

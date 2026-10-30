@@ -124,9 +124,12 @@ test("an expired suppression reopens its findings by itself", async () => {
   assert.equal(s.json.suppressed, 1);
   assert.equal((await c.get("/suppressions")).json.items[0].suppressed, 1);
   await db.query("update suppressions set expires_at = now() - interval '1 minute' where id = $1", [s.json.id]);
-  assert.equal((await c.get("/suppressions")).json.items.length, 0);                // gone from the list
-  assert.equal((await c.get("/findings?status=false_positive")).json.total, 0);      // and reopened
-  assert.equal((await open(c, "encryption")).total, 1);
+  // nobody opened the suppression list: the ordinary views still show the right posture
+  const before = (await c.get("/overview")).json.openTotal;
+  assert.equal((await open(c, "encryption")).total, 1);                              // reopened
+  assert.equal((await c.get("/findings?status=false_positive")).json.total, 0);
+  assert.equal(before, 1);
+  assert.equal((await c.get("/suppressions")).json.items.length, 0);                 // and gone from the list
   void me;
 });
 
@@ -141,4 +144,57 @@ test("reopening a suppressed finding by hand takes it out of the suppression and
   assert.equal((await c.get(`/findings/${f.id}`)).json.status, "open");
   assert.equal((await c.get("/suppressions")).json.items[0].suppressed, 0);
   void s;
+});
+
+test("overlapping suppressions: removing the broad one keeps what the narrower one still covers", async () => {
+  const { c } = await signup();
+  await c.post("/scans", { config: [bucket("prod-1"), bucket("stg-1", "staging"), bucket("stg-2", "staging")] });
+  const all = await c.post("/suppressions", { ruleId: RULE, reason: "Everywhere for now" });
+  assert.equal(all.json.suppressed, 3);
+  const stg = await c.post("/suppressions", { ruleId: RULE, environment: "staging", reason: "Staging stays exempt" });
+  assert.equal(stg.json.suppressed, 2);                                              // the more specific one takes over its two
+  assert.equal((await c.get("/suppressions")).json.items.find((x: any) => x.id === all.json.id).suppressed, 1);
+  const del = await c.del(`/suppressions/${all.json.id}`);
+  assert.equal(del.json.reopened, 1);                                                // only prod-1 comes back
+  assert.deepEqual((await open(c)).items.filter((f: any) => f.assetType === "s3_bucket").map((f: any) => f.assetName), ["prod-1"]);
+  assert.equal((await c.get("/findings?status=false_positive")).json.total, 2);
+  await c.post("/scans", { config: [bucket("prod-1"), bucket("stg-1", "staging"), bucket("stg-2", "staging")] });
+  assert.equal((await c.get("/findings?status=false_positive")).json.total, 2);      // a rescan agrees
+});
+
+test("an asset that moves into or out of a suppressed environment follows the suppression on the next scan", async () => {
+  const { c } = await signup();
+  await c.post("/scans", { config: [bucket("moving")] });                            // production
+  await c.post("/suppressions", { ruleId: RULE, environment: "staging", reason: "Staging is disposable" });
+  assert.equal((await open(c, "moving")).total, 1);                                  // production: still open
+  await c.post("/scans", { config: [bucket("moving", "staging")] });
+  assert.equal((await open(c, "moving")).total, 0);                                  // moved into staging: suppressed
+  assert.equal((await c.get("/findings?status=false_positive")).json.total, 1);
+  await c.post("/scans", { config: [bucket("moving", "production")] });
+  assert.equal((await open(c, "moving")).total, 1);                                  // and back: open again
+});
+
+test("a suppressed finding whose problem is fixed becomes fixed, and removing the suppression does not bring it back", async () => {
+  const { c } = await signup();
+  await c.post("/scans", { config: [bucket("a"), bucket("b")] });
+  const s = await c.post("/suppressions", { ruleId: RULE, reason: "Known and accepted" });
+  await c.post("/scans", { config: [{ ...bucket("a"), encrypted: true }, bucket("b")] }); // a is now encrypted
+  const fixed = (await c.get("/findings?status=fixed")).json.items;
+  assert.deepEqual(fixed.map((f: any) => f.assetName), ["a"]);
+  assert.equal((await c.get("/suppressions")).json.items[0].suppressed, 1);          // only b is still suppressed
+  assert.equal((await c.del(`/suppressions/${s.json.id}`)).json.reopened, 1);
+  assert.deepEqual((await open(c)).items.filter((f: any) => f.assetType === "s3_bucket").map((f: any) => f.assetName), ["b"]);
+  // the same when the whole asset disappears from a complete scan of the account is covered by the shared update; here: nothing resurrects a
+  assert.equal((await c.get("/findings?status=fixed")).json.total, 1);
+});
+
+test("the scheduler's sweep expires suppressions without anyone opening a page", async () => {
+  const { c, me } = await signup();
+  await c.post("/scans", { config: [bucket("a")] });
+  const s = await c.post("/suppressions", { ruleId: RULE, reason: "Short exception", expiresInDays: 1 });
+  await db.query("update suppressions set expires_at = now() - interval '1 minute' where id = $1", [s.json.id]);
+  const { sweepExpiredSuppressions } = await import("../src/services/suppressions.ts");
+  await sweepExpiredSuppressions(db);
+  const left = await db.query("select (select count(*)::int from suppressions where org_id = $1) as s, (select count(*)::int from findings where org_id = $1 and status = 'open') as o", [me.org.id]);
+  assert.deepEqual(left.rows[0], { s: 0, o: 1 });
 });
