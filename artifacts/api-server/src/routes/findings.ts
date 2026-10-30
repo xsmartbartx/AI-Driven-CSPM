@@ -5,7 +5,7 @@ import { PLANS } from "../config";
 import { parse, requireRole, uuidParam } from "../lib/http";
 import { bad, HttpError, notFound } from "../lib/errors";
 import { audit } from "../lib/audit";
-import { refreshSuppressions } from "../services/suppressions";
+import { lockOrg, refreshSuppressions } from "../services/suppressions";
 import { explainFinding } from "../services/ai";
 import { period, usageOf } from "../services/scans";
 
@@ -59,9 +59,14 @@ r.patch("/findings/:id", requireRole("analyst"), async (req, res) => {
     if (!until || Number.isNaN(+until) || until <= new Date()) throw bad("Accepted risk needs an expiry date in the future", "expiry_required");
     if (+until - Date.now() > 366 * 86400_000) throw bad("Accepted risk can last at most one year", "expiry_too_long");
   }
-  const { rows } = await req.db.query(
-    `update findings set status=$3, status_reason=$4, accepted_until=$5, suppress_exempt = case when $3 = 'open' and suppression_id is not null then true else suppress_exempt end, suppression_id=null, updated_at=now() where id=$1 and org_id=$2 and status <> 'fixed' returning id`,
-    [id, req.auth!.orgId, b.status, b.status === "open" ? null : b.reason, until]);
+  // under the organization lock, so a scan or a suppression change cannot write over this decision half way
+  const rows = await req.db.tx(async (q) => {
+    await lockOrg(q, req.auth!.orgId);
+    // reopening something that was closed (suppressed, accepted or a false positive) is an explicit decision: suppressions leave it alone until it is fixed
+    return (await q.query(
+      `update findings set status=$3, status_reason=$4, accepted_until=$5, suppress_exempt = case when $3 = 'open' and status <> 'open' then true else suppress_exempt end, suppression_id=null, updated_at=now() where id=$1 and org_id=$2 and status <> 'fixed' returning id`,
+      [id, req.auth!.orgId, b.status, b.status === "open" ? null : b.reason, until])).rows;
+  });
   if (!rows[0]) throw notFound("Finding not found, or already fixed");
   await audit(req, `finding.${b.status}`, id);
   res.json({ ok: true });

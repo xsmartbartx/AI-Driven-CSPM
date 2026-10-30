@@ -1,4 +1,5 @@
 import type { Db, Queryable } from "@workspace/db";
+import { logger } from "../lib/logger";
 
 export interface ActiveSuppression { id: string; ruleId: string; assetId: string | null; environment: string | null; reason: string }
 export const MAX_SUPPRESSIONS = 100;
@@ -53,7 +54,12 @@ export async function refreshSuppressions(db: Db, orgId: string): Promise<void> 
 /** For the scheduler: expiry must not wait for somebody to open a page. */
 export async function sweepExpiredSuppressions(sysDb: Db): Promise<void> {
   const { rows } = await sysDb.query("select distinct org_id from suppressions where expires_at is not null and expires_at <= now() limit 50");
-  for (const r of rows) { const db = sysDb.scoped(r.org_id); try { await refreshSuppressions(db, r.org_id); } finally { await db.release(true).catch(() => {}); } }
+  for (const r of rows) {
+    const db = sysDb.scoped(r.org_id);
+    try { await refreshSuppressions(db, r.org_id); }
+    catch (e) { logger.warn({ org: r.org_id, err: e instanceof Error ? e.name : "error" }, "could not expire suppressions"); } // one organization must not stop the others
+    finally { await db.release(true).catch(() => {}); }
+  }
 }
 
 export async function activeSuppressions(q: Queryable, orgId: string): Promise<(ActiveSuppression & { createdAt: string })[]> {

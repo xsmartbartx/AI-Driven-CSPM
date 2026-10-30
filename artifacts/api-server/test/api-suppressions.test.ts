@@ -198,3 +198,33 @@ test("the scheduler's sweep expires suppressions without anyone opening a page",
   const left = await db.query("select (select count(*)::int from suppressions where org_id = $1) as s, (select count(*)::int from findings where org_id = $1 and status = 'open') as o", [me.org.id]);
   assert.deepEqual(left.rows[0], { s: 0, o: 1 });
 });
+
+test("reopening a finding that was closed by hand (accepted) before a suppression existed is not undone by that suppression", async () => {
+  const { c } = await signup();
+  await c.post("/scans", { config: [bucket("a"), bucket("b")] });
+  const items = (await open(c)).items.filter((f: any) => f.assetType === "s3_bucket");
+  const a = items.find((f: any) => f.assetName === "a");
+  const until = new Date(Date.now() + 30 * 86400_000).toISOString();
+  assert.equal((await c.patch(`/findings/${a.id}`, { status: "accepted", reason: "Tracked in the backlog", acceptedUntil: until })).status, 200);
+  await c.post("/suppressions", { ruleId: RULE, reason: "Everything else is fine" });      // b is suppressed; a is accepted and left alone
+  assert.equal((await c.get(`/findings/${a.id}`)).json.status, "accepted");
+  assert.equal((await c.patch(`/findings/${a.id}`, { status: "open" })).status, 200);       // the analyst reopens it on purpose
+  await c.post("/scans", { config: [bucket("a"), bucket("b")] });                           // any reconcile
+  assert.equal((await c.get(`/findings/${a.id}`)).json.status, "open");
+  assert.equal((await c.get("/findings?status=false_positive")).json.items.map((f: any) => f.assetName).join(), "b");
+});
+
+test("one organization failing to expire does not stop the sweep for the others", async () => {
+  const a = await signup(), b = await signup();
+  for (const x of [a, b]) {
+    await x.c.post("/scans", { config: [bucket("z")] });
+    const s = await x.c.post("/suppressions", { ruleId: RULE, reason: "Short exception", expiresInDays: 1 });
+    await db.query("update suppressions set expires_at = now() - interval '1 minute' where id = $1", [s.json.id]);
+  }
+  const { sweepExpiredSuppressions } = await import("../src/services/suppressions.ts");
+  const real = db.scoped.bind(db); let calls = 0;
+  (db as any).scoped = (org: string) => { const d = real(org); if (++calls === 1) { const q = d.tx.bind(d); (d as any).tx = async () => { throw new Error("boom"); }; void q; } return d; };
+  try { await sweepExpiredSuppressions(db); } finally { (db as any).scoped = real; }
+  const left = await db.query("select count(*)::int as n from suppressions where org_id = any($1::uuid[])", [[a.me.org.id, b.me.org.id]]);
+  assert.equal(left.rows[0].n, 1);                                                          // the failing one stays, the other was swept
+});

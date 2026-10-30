@@ -111,7 +111,8 @@ export function startScheduler(d: SchedulerDeps, tickMs = 60_000): { stop(): Pro
   const tick = () => {
     if (stopped || inflight) return;
     inflight = (async () => {
-      try { await sweepExpiredSuppressions(d.db); await runDueScans(d); } catch (e) { logger.error({ err: (e as Error).name }, "scheduler tick failed"); }
+      try { await sweepExpiredSuppressions(d.db); } catch (e) { logger.error({ err: (e as Error).name }, "suppression sweep failed"); } // never blocks the scans below
+      try { await runDueScans(d); } catch (e) { logger.error({ err: (e as Error).name }, "scheduler tick failed"); }
     })().finally(() => { inflight = null; });
   };
   const timer = setInterval(tick, tickMs);
