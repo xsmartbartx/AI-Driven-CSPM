@@ -434,6 +434,39 @@ test.describe("F11 attack paths", () => {
   });
 });
 
+test.describe("F13 rule suppression", () => {
+  test("F13-H1 suppress a rule from a finding: it leaves the open list and the score counts, shows in Settings, and removing it brings the finding back", async ({ page }) => {
+    await signUp(page);
+    await runSampleScan(page);
+    await page.goto("/findings");
+    await expect(page.getByRole("row")).toHaveCount(8); // 7 open findings + header
+    const openRows = 8;
+    await page.getByRole("link", { name: "Policy grants full administrator access" }).click();
+    await page.getByRole("button", { name: "Suppress this rule…" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await a11y(page, "suppress dialog");
+    await page.getByLabel("Every asset").check();
+    await page.getByLabel("Reason").fill("Break-glass role, reviewed by security");
+    await page.getByRole("button", { name: "Suppress", exact: true }).click();
+    await expect(page.getByText(/This finding is hidden by a rule suppression/)).toBeVisible();
+    await page.goto("/findings");
+    await expect(page.getByRole("row")).toHaveCount(openRows - 1);
+    await expect(page.getByRole("link", { name: "Policy grants full administrator access" })).toHaveCount(0);
+    await page.goto("/settings");
+    const card = page.locator("section", { has: page.getByRole("heading", { name: "Suppressed rules" }) });
+    await expect(card).toContainText("Policy grants full administrator access");
+    await expect(card).toContainText("every asset");
+    await expect(card).toContainText("Break-glass role, reviewed by security");
+    await a11y(page, "settings with suppressions");
+    page.once("dialog", (d) => d.accept());
+    await card.getByRole("button", { name: "Remove" }).click();
+    await expect(card).toContainText("None.");
+    await page.goto("/findings");
+    await expect(page.getByRole("row")).toHaveCount(openRows);
+    await expect(page.getByRole("link", { name: "Policy grants full administrator access" })).toBeVisible();
+  });
+});
+
 test.describe("F12 executive report", () => {
   test("F12-E1 before any scan the report says there is nothing to report", async ({ page }) => {
     await signUp(page);

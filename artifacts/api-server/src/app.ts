@@ -11,6 +11,7 @@ import type { AwsConnector } from "./services/aws/types";
 import cloudRouter from "./routes/cloud";
 import pathsRouter from "./routes/paths";
 import notificationsRouter from "./routes/notifications";
+import suppressionsRouter from "./routes/suppressions";
 import healthRouter from "./routes/health";
 import authRouter from "./routes/auth";
 import scansRouter from "./routes/scans";
@@ -51,7 +52,7 @@ export function createApp(db: Db, opts: { mailer?: Mailer; aws?: AwsConnector; f
     next();
   });
 
-  app.use("/api", healthRouter, authRouter, scansRouter, findingsRouter, teamRouter, cloudRouter, pathsRouter, notificationsRouter);
+  app.use("/api", healthRouter, authRouter, scansRouter, findingsRouter, teamRouter, cloudRouter, pathsRouter, notificationsRouter, suppressionsRouter);
   app.use("/api", (_req, _res, next) => next(new HttpError(404, "not_found", "Unknown endpoint")));
 
   app.use((err: any, req: Request, res: Response, _next: NextFunction) => {

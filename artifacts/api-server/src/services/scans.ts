@@ -4,6 +4,7 @@ import { PLANS, type PlanId } from "../config";
 import { bad, HttpError } from "../lib/errors";
 import type { Auth } from "../lib/context";
 import type { Alert } from "./notifications";
+import { activeSuppressions, expireLocked, matchSuppression, reconcile, suppressedReason } from "./suppressions";
 
 const SEVS: Severity[] = ["critical", "high", "medium", "low"];
 const alertable = (s: Severity) => s === "critical" || s === "high"; // the only levels an alert can be set to; keeps the cap for what can be sent
@@ -61,7 +62,10 @@ export async function runScan(db: { tx: <T>(fn: (q: Queryable) => Promise<T>) =>
     const scanId = s[0].id as string;
     await q.query("insert into usage_events (org_id, kind, period) values ($1,'scan',$2)", [auth.orgId, per]);
 
+    await expireLocked(q, auth.orgId); // the org row is locked above, so no suppression changes under this scan
+    const suppressions = await activeSuppressions(q, auth.orgId);
     const assetId = new Map<string, string>();
+    const assetEnv = new Map<string, string>();
     for (const r of resources) {
       const { rows } = await q.query(
         `insert into assets (org_id, provider, type, name, environment, criticality, owner, raw, account_id, last_scan_id)
@@ -75,14 +79,15 @@ export async function runScan(db: { tx: <T>(fn: (q: Queryable) => Promise<T>) =>
           Math.min(10, Math.max(1, Math.round(Number(r.criticality ?? defaultCriticality(r))) || 5)),
           typeof r.owner === "string" ? r.owner.slice(0, 100) : null, JSON.stringify(r), opts.accountId ?? null, scanId]);
       assetId.set(`${r.type}/${r.name}`, rows[0].id);
+      assetEnv.set(rows[0].id, ["production", "staging", "development"].includes(r.environment as string) ? (r.environment as string) : "production");
     }
 
     const ids = [...assetId.values()];
     const { rows: existing } = await q.query(
-      "select id, asset_id, rule_id, status, accepted_until from findings where org_id = $1 and asset_id = any($2::uuid[])", [auth.orgId, ids]);
+      "select id, asset_id, rule_id, status, accepted_until, suppression_id from findings where org_id = $1 and asset_id = any($2::uuid[])", [auth.orgId, ids]);
     const exMap = new Map(existing.map((e) => [`${e.asset_id}/${e.rule_id}`, e]));
     const seen = new Set<string>();
-    let created = 0, reopened = 0, persisting = 0, fixed = 0;
+    let created = 0, reopened = 0, persisting = 0, fixed = 0, suppressed = 0;
     const alerts: Alert[] = []; // findings that are new or came back; the caller decides whether anyone is told
 
     for (const f of findings) {
@@ -90,32 +95,36 @@ export async function runScan(db: { tx: <T>(fn: (q: Queryable) => Promise<T>) =>
       const key = `${aid}/${f.ruleId}`;
       seen.add(key);
       const ex = exMap.get(key);
+      const sup = matchSuppression(suppressions, f.ruleId, aid, assetEnv.get(aid)!);
       if (ex) {
         const expired = ex.status === "accepted" && ex.accepted_until && new Date(ex.accepted_until) < new Date();
         const reopen = ex.status === "fixed" || expired;
         await q.query(
           `update findings set scan_id=$2, title=$3, severity=$4, risk_score=$5, evidence=$6::jsonb, remediation=$7, frameworks=$8::text[],
              last_seen_at=now(), updated_at=now(),
-             status = case when $9 then 'open' else status end,
-             status_reason = case when $9 then null else status_reason end,
+             status = case when $9 then $11 else status end,
+             status_reason = case when $9 then $12 else status_reason end,
+             suppression_id = case when $9 then $13::uuid else suppression_id end,
              accepted_until = case when $9 then null else accepted_until end,
-             first_seen_at = case when $10 then now() else first_seen_at end
+             first_seen_at = case when $10 then now() else first_seen_at end,
+             suppress_exempt = case when $9 then false else suppress_exempt end
            where id=$1`,
-          [ex.id, scanId, f.title, f.severity, f.riskScore, JSON.stringify(f.evidence), f.remediation, f.frameworks, reopen, ex.status === "fixed"]);
-        if (reopen) { reopened++; if (alertable(f.severity) && alerts.length < 200) alerts.push({ title: f.title, severity: f.severity, asset: f.resourceName, type: f.resourceType }); } else persisting++;
+          [ex.id, scanId, f.title, f.severity, f.riskScore, JSON.stringify(f.evidence), f.remediation, f.frameworks, reopen, ex.status === "fixed", sup ? "false_positive" : "open", sup ? suppressedReason(sup.reason) : null, sup?.id ?? null]);
+        if (reopen && sup) suppressed++; else if (reopen) { reopened++; if (alertable(f.severity) && alerts.length < 200) alerts.push({ title: f.title, severity: f.severity, asset: f.resourceName, type: f.resourceType }); } else persisting++;
       } else {
         await q.query(
-          `insert into findings (org_id, scan_id, asset_id, rule_id, title, severity, risk_score, evidence, remediation, frameworks)
-           values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10::text[])`,
-          [auth.orgId, scanId, aid, f.ruleId, f.title, f.severity, f.riskScore, JSON.stringify(f.evidence), f.remediation, f.frameworks]);
-        created++;
-        if (alertable(f.severity) && alerts.length < 200) alerts.push({ title: f.title, severity: f.severity, asset: f.resourceName, type: f.resourceType });
+          `insert into findings (org_id, scan_id, asset_id, rule_id, title, severity, risk_score, evidence, remediation, frameworks, status, status_reason, suppression_id)
+           values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10::text[],$11,$12,$13)`,
+          [auth.orgId, scanId, aid, f.ruleId, f.title, f.severity, f.riskScore, JSON.stringify(f.evidence), f.remediation, f.frameworks, sup ? "false_positive" : "open", sup ? suppressedReason(sup.reason) : null, sup?.id ?? null]);
+        if (sup) suppressed++; else created++;
+        if (!sup && alertable(f.severity) && alerts.length < 200) alerts.push({ title: f.title, severity: f.severity, asset: f.resourceName, type: f.resourceType });
       }
     }
     // findings on scanned assets that no longer trigger are fixed
     for (const e of existing) {
-      if (seen.has(`${e.asset_id}/${e.rule_id}`) || !["open", "accepted"].includes(e.status)) continue;
-      await q.query("update findings set status='fixed', updated_at=now() where id=$1", [e.id]);
+      const live = ["open", "accepted"].includes(e.status) || (e.status === "false_positive" && e.suppression_id); // suppressed findings get fixed too; manual false positives stay as they are
+      if (seen.has(`${e.asset_id}/${e.rule_id}`) || !live) continue;
+      await q.query("update findings set status='fixed', suppression_id=null, suppress_exempt=false, updated_at=now() where id=$1", [e.id]);
       fixed++;
     }
 
@@ -123,13 +132,14 @@ export async function runScan(db: { tx: <T>(fn: (q: Queryable) => Promise<T>) =>
     // seen this time are fixed. An incomplete scan (a denied service, the resource cap) must never conclude that.
     if (opts.accountId && opts.complete) {
       const gone = await q.query(
-        "update findings set status = 'fixed', updated_at = now() where org_id = $1 and status in ('open','accepted') and asset_id in (select id from assets where org_id = $1 and account_id = $2 and id <> all($3::uuid[])) returning id",
+        "update findings set status = 'fixed', suppression_id = null, suppress_exempt = false, updated_at = now() where org_id = $1 and (status in ('open','accepted') or (status = 'false_positive' and suppression_id is not null)) and asset_id in (select id from assets where org_id = $1 and account_id = $2 and id <> all($3::uuid[])) returning id",
         [auth.orgId, opts.accountId, ids]);
       fixed += gone.rows.length;
     }
+    await reconcile(q, auth.orgId); // findings whose asset moved into or out of a suppressed environment
     const c = await openCounts(q, auth.orgId);
     const score = postureScore(c);
-    const counts = { new: created + reopened, fixed, persisting, open: c };
+    const counts = { new: created + reopened, fixed, persisting, suppressed, open: c };
     await q.query("update scans set finding_count=$2, score=$3, counts=$4::jsonb, updated_at=now() where id=$1", [scanId, findings.length, score, JSON.stringify(counts)]);
     await q.query(
       `insert into risk_snapshots (org_id, day, score, critical, high, medium, low) values ($1, (now() at time zone 'utc')::date, $2,$3,$4,$5,$6)

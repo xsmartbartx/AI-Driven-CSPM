@@ -5,6 +5,7 @@ import { PLANS } from "../config";
 import { parse, requireRole, uuidParam } from "../lib/http";
 import { bad, HttpError, notFound } from "../lib/errors";
 import { audit } from "../lib/audit";
+import { lockOrg, refreshSuppressions } from "../services/suppressions";
 import { explainFinding } from "../services/ai";
 import { period, usageOf } from "../services/scans";
 
@@ -14,6 +15,7 @@ const COLS = `f.id, f.title, f.severity, f.risk_score as "riskScore", f.status, 
 const esc = (s: string) => s.replace(/[\\%_]/g, (m) => "\\" + m);
 
 r.get("/findings", requireRole("viewer"), async (req, res) => {
+  await refreshSuppressions(req.db, req.auth!.orgId);
   const q = parse(z.object({
     q: z.string().max(100).optional(), severity: z.enum(["critical", "high", "medium", "low"]).optional(),
     status: z.enum(["open", "fixed", "accepted", "false_positive", "all"]).default("open"),
@@ -34,9 +36,10 @@ r.get("/findings", requireRole("viewer"), async (req, res) => {
 });
 
 r.get("/findings/:id", requireRole("viewer"), async (req, res) => {
+  await refreshSuppressions(req.db, req.auth!.orgId);
   const id = uuidParam(req.params["id"]);
   const { rows } = await req.db.query(
-    `select ${COLS}, f.evidence, f.remediation, f.frameworks, f.status_reason as "statusReason", f.accepted_until as "acceptedUntil", a.id as "assetId", a.criticality, a.owner
+    `select ${COLS}, f.evidence, f.remediation, f.frameworks, f.status_reason as "statusReason", f.accepted_until as "acceptedUntil", f.suppression_id as "suppressionId", a.id as "assetId", a.criticality, a.owner
      from findings f join assets a on a.id = f.asset_id where f.id = $1 and f.org_id = $2`, [id, req.auth!.orgId]);
   if (!rows[0]) throw notFound("Finding not found");
   const brief = await req.db.query("select content, model, created_at as \"createdAt\" from ai_briefs where finding_id = $1 and org_id = $2 and kind = 'finding' order by created_at desc limit 1", [id, req.auth!.orgId]);
@@ -56,9 +59,14 @@ r.patch("/findings/:id", requireRole("analyst"), async (req, res) => {
     if (!until || Number.isNaN(+until) || until <= new Date()) throw bad("Accepted risk needs an expiry date in the future", "expiry_required");
     if (+until - Date.now() > 366 * 86400_000) throw bad("Accepted risk can last at most one year", "expiry_too_long");
   }
-  const { rows } = await req.db.query(
-    `update findings set status=$3, status_reason=$4, accepted_until=$5, updated_at=now() where id=$1 and org_id=$2 and status <> 'fixed' returning id`,
-    [id, req.auth!.orgId, b.status, b.status === "open" ? null : b.reason, until]);
+  // under the organization lock, so a scan or a suppression change cannot write over this decision half way
+  const rows = await req.db.tx(async (q) => {
+    await lockOrg(q, req.auth!.orgId);
+    // reopening something that was closed (suppressed, accepted or a false positive) is an explicit decision: suppressions leave it alone until it is fixed
+    return (await q.query(
+      `update findings set status=$3, status_reason=$4, accepted_until=$5, suppress_exempt = case when $3 = 'open' and status <> 'open' then true else suppress_exempt end, suppression_id=null, updated_at=now() where id=$1 and org_id=$2 and status <> 'fixed' returning id`,
+      [id, req.auth!.orgId, b.status, b.status === "open" ? null : b.reason, until])).rows;
+  });
   if (!rows[0]) throw notFound("Finding not found, or already fixed");
   await audit(req, `finding.${b.status}`, id);
   res.json({ ok: true });
@@ -94,6 +102,7 @@ r.post("/findings/:id/explain", requireRole("analyst"), async (req, res) => {
 });
 
 r.get("/assets", requireRole("viewer"), async (req, res) => {
+  await refreshSuppressions(req.db, req.auth!.orgId);
   const q = parse(z.object({ type: z.string().max(50).optional(), q: z.string().max(100).optional() }), req.query);
   const p: unknown[] = [req.auth!.orgId]; let w = "a.org_id = $1";
   if (q.type) { p.push(q.type); w += ` and a.type = $${p.length}`; }
@@ -107,6 +116,7 @@ r.get("/assets", requireRole("viewer"), async (req, res) => {
 });
 
 r.get("/compliance", requireRole("viewer"), async (req, res) => {
+  await refreshSuppressions(req.db, req.auth!.orgId);
   const { rows } = await req.db.query("select distinct rule_id from findings where org_id = $1 and status = 'open'", [req.auth!.orgId]);
   const frameworks = complianceFrom(rows.map((x) => x.rule_id));
   const titles = Object.fromEntries(frameworks.flatMap((f) => f.failedControls.flatMap((c) => c.ruleIds)).map((id) => [id, ruleById(id)?.title ?? id]));

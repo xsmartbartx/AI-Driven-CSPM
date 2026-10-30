@@ -2,6 +2,8 @@ import { Router } from "express";
 import { analyzePaths, type Resource } from "@workspace/cspm-engine";
 import { requireRole } from "../lib/http";
 
+import { refreshSuppressions } from "../services/suppressions";
+
 const r = Router();
 const LIMIT = 2000;
 
@@ -11,6 +13,7 @@ const LIMIT = 2000;
  * the last 30 days. Findings that already exist on the assets in a path are attached so the page can link to them.
  */
 r.get("/attack-paths", requireRole("viewer"), async (req, res) => {
+  await refreshSuppressions(req.db, req.auth!.orgId);
   const orgId = req.auth!.orgId;
   const { rows } = await req.db.query(
     `select a.type, a.name, a.environment, a.criticality, a.raw
