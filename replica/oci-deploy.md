@@ -75,6 +75,8 @@ crontab -e    # add:   17 3 * * *  cd $HOME/AI-Driven-CSPM/deploy/oci && ./backu
 ```
 It keeps the newest 14 and refuses to keep an empty dump. **Copy backups off the VM** (OCI Object Storage bucket, another machine): a backup on the same disk does not survive losing the VM. **Practise a restore** once on a throwaway copy: `./restore.sh <file>` asks you to type `restore`.
 
+**Hosts that already back up to OCI Object Storage** (the NEXORA host): `deploy/oci/backup-offsite.sh` makes the same dump, keeps 14 locally in `/opt/backups/cspm`, and copies each one to the bucket as the instance itself (instance principal; the host can create objects but not delete them). Cron entry: `20 3 * * * /home/opc/cspm-deploy/deploy/oci/backup-offsite.sh >> /opt/backups/cspm-backup.log 2>&1`. A failed upload exits non-zero and says why; `last-success` in the backup directory holds the time of the last full success. Check the bucket's expiry rule covers the `cspm/` prefix. Restore with `restore.sh` (same format). It is not part of the platform's own `backup-all.sh`, so the platform restore drill does not cover it: practise a CSPM restore once.
+
 **Logs:** `docker compose logs -f api` (JSON lines; no tokens, passwords or request bodies are logged). **Restart:** `docker compose restart api`. **Stop everything:** `docker compose down` (data stays in the volumes; `down -v` deletes it).
 **Disk:** `docker system df`; prune old images after updates with `docker image prune -f`.
 
