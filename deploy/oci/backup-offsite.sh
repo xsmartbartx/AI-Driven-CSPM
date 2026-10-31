@@ -3,7 +3,7 @@
 # a local dump, kept for 14 days, plus an off-site copy made as the instance itself (instance principal, no keys on disk).
 # The host may only create objects there, not delete them; expiry is the bucket's own rule.
 # The dump format is the one restore.sh reads. Run from cron, for example:
-#   20 3 * * * /home/opc/cspm-deploy/deploy/oci/backup-offsite.sh >> /opt/backups/cspm-backup.log 2>&1
+#   20 3 * * * DB_CONTAINER=cspm-db-1 /home/opc/cspm-deploy/deploy/oci/backup-offsite.sh >> /opt/backups/cspm-backup.log 2>&1   (the NEXORA host)
 #   BACKUP_DIR=... BUCKET=... PREFIX=... DB_CONTAINER=... KEEP=... ./backup-offsite.sh
 # DB_CONTAINER defaults to the database container of this kit's own compose project (nexora-cspm). Started with another
 # project name, as on the NEXORA host (docker compose -p cspm ...), set it: DB_CONTAINER=cspm-db-1 (the cron line does).
