@@ -20,6 +20,7 @@ type Json = Record<string, any>;
 const obj = (v: unknown): Json | null => (v && typeof v === "object" && !Array.isArray(v) ? (v as Json) : null);
 const list = (v: unknown): any[] => (Array.isArray(v) ? v : v === undefined || v === null ? [] : [v]);
 const base = (address: string) => address.replace(/\[[^\]]*\]/g, "");
+const indexOf = (address: string): string | null => /\[([^\]]*)\]$/.exec(address)?.[1] ?? null;
 
 /** address (without index) -> addresses of what it points at, for every resource in the configuration, with the attribute that points */
 function referenceMap(plan: Json): Map<string, Map<string, string[]>> {
@@ -29,7 +30,8 @@ function referenceMap(plan: Json): Map<string, Map<string, string[]>> {
     for (const r of list(mod["resources"])) {
       const attrs = new Map<string, string[]>();
       for (const [k, v] of Object.entries(obj(r.expressions) ?? {})) {
-        const refs = list(obj(v)?.["references"]).filter((x): x is string => typeof x === "string").map((x) => prefix + x.split(".").slice(0, 2).join(".")).map(base);
+        // keep an explicit index (aws_s3_bucket.b[0]) so a child that names one instance is not joined to the others
+        const refs = list(obj(v)?.["references"]).filter((x): x is string => typeof x === "string").map((x) => prefix + x.split(".").slice(0, 2).join("."));
         if (refs.length) attrs.set(k, [...new Set(refs)]);
       }
       out.set(prefix + base(String(r.address)), attrs);
@@ -78,9 +80,22 @@ export function fromTerraformPlan(input: unknown): TerraformResult {
   const unknownAt = (c: Json, key: string) => obj(c.change.after_unknown)?.[key] === true;
   const get = (c: Json, key: string) => { if (unknownAt(c, key)) { unknownValues++; return undefined; } return c.change.after[key]; };
 
-  /** resources of a type whose attribute points at the given resource */
+  /**
+   * Resources of a type whose attribute points at the given resource. A reference that names an instance
+   * (aws_s3_bucket.b[0]) joins only that one. A plain reference from a counted child (bucket = aws_s3_bucket.b[count.index].id)
+   * joins the parent instance with the same index; a child that is not counted joins every instance.
+   */
   const pointingAt = (type: string, attr: string, target: string): Json[] =>
-    live.filter((c) => c.type === type && (refs.get(base(String(c.address)))?.get(attr) ?? []).includes(base(target)));
+    live.filter((c) => {
+      if (c.type !== type) return false;
+      const named = refs.get(base(String(c.address)))?.get(attr) ?? [];
+      const toThis = named.filter((x) => base(x) === base(target));
+      if (!toThis.length) return false;
+      const explicit = toThis.filter((x) => indexOf(x) !== null);
+      if (explicit.length) return explicit.some((x) => indexOf(x) === indexOf(target));
+      const mine = indexOf(String(c.address)), theirs = indexOf(target);
+      return mine === null || theirs === null || mine === theirs;
+    });
 
   const out: Resource[] = [];
   for (const c of live) {

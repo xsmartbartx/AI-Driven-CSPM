@@ -79,3 +79,29 @@ test("a value the plan cannot know yet is never reported as missing encryption; 
   const none = fromTerraformPlan({ resource_changes: [rc("aws_db_instance.c", "aws_db_instance", { storage_encrypted: null, kms_key_id: null })] });
   assert.deepEqual(evaluate(none.resources).findings.map((f) => f.ruleId), ["db-no-encryption"]);
 });
+
+test("counted resources: a child joins the parent with the same index, or the one it names, never all of them", () => {
+  const plan = {
+    resource_changes: [
+      rc("aws_s3_bucket.b[0]", "aws_s3_bucket", { bucket: "b0" }), rc("aws_s3_bucket.b[1]", "aws_s3_bucket", { bucket: "b1" }),
+      rc("aws_s3_bucket_acl.a[0]", "aws_s3_bucket_acl", { acl: "private" }), rc("aws_s3_bucket_acl.a[1]", "aws_s3_bucket_acl", { acl: "public-read" }),
+      rc("aws_s3_bucket.c[0]", "aws_s3_bucket", { bucket: "c0" }), rc("aws_s3_bucket.c[1]", "aws_s3_bucket", { bucket: "c1" }),
+      rc("aws_s3_bucket_acl.single", "aws_s3_bucket_acl", { acl: "public-read" }),                       // names c[1] explicitly
+      rc("aws_s3_bucket.d[0]", "aws_s3_bucket", { bucket: "d0" }), rc("aws_s3_bucket.d[1]", "aws_s3_bucket", { bucket: "d1" }),
+      rc("aws_s3_bucket_acl.d_acl", "aws_s3_bucket_acl", { acl: "public-read" }),                        // not counted, plain reference: every instance
+      rc("aws_s3_bucket_public_access_block.pab[1]", "aws_s3_bucket_public_access_block", { block_public_acls: true, ignore_public_acls: true }),
+      rc("aws_s3_bucket.e[0]", "aws_s3_bucket", { acl: "public-read" }), rc("aws_s3_bucket.e[1]", "aws_s3_bucket", { acl: "public-read" }),
+    ],
+    configuration: { root_module: { resources: [
+      conf("aws_s3_bucket_acl.a", { bucket: ref("aws_s3_bucket.b") }),
+      conf("aws_s3_bucket_acl.single", { bucket: ref("aws_s3_bucket.c[1].id", "aws_s3_bucket.c[1]") }),
+      conf("aws_s3_bucket_acl.d_acl", { bucket: ref("aws_s3_bucket.d") }),
+      conf("aws_s3_bucket_public_access_block.pab", { bucket: ref("aws_s3_bucket.e") }),
+    ] } },
+  };
+  const pub = new Set(fromTerraformPlan(plan).resources.filter((r) => r["public_read"] === true).map((r) => r.name));
+  assert.ok(!pub.has("aws_s3_bucket.b[0]") && pub.has("aws_s3_bucket.b[1]"));        // a[1] belongs to b[1] only
+  assert.ok(!pub.has("aws_s3_bucket.c[0]") && pub.has("aws_s3_bucket.c[1]"));        // the explicit reference
+  assert.ok(pub.has("aws_s3_bucket.d[0]") && pub.has("aws_s3_bucket.d[1]"));         // an uncounted child covers every instance
+  assert.ok(pub.has("aws_s3_bucket.e[0]") && !pub.has("aws_s3_bucket.e[1]"));        // the block on e[1] must not hide e[0]
+});
