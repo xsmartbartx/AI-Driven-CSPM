@@ -68,3 +68,14 @@ test("input that is not a plan is refused with the command that makes one; inlin
   const many = { resource_changes: Array.from({ length: 501 }, (_, i) => rc(`aws_db_instance.d${i}`, "aws_db_instance", { storage_encrypted: true })) };
   assert.match(fromTerraformPlan(many).errors[0]!, /Too many resources/);
 });
+
+test("a value the plan cannot know yet is never reported as missing encryption; a KMS key counts as encrypted", () => {
+  const unknown = fromTerraformPlan({ resource_changes: [{ ...rc("aws_db_instance.a", "aws_db_instance", { publicly_accessible: false }), change: { actions: ["create"], after: { publicly_accessible: false }, after_unknown: { storage_encrypted: true } } }] });
+  assert.equal(unknown.resources[0]!["encrypted"], undefined);
+  assert.deepEqual(evaluate(unknown.resources).findings, []);
+  assert.ok(unknown.notes.some((n) => /only known after apply/.test(n)));
+  const kms = fromTerraformPlan({ resource_changes: [rc("aws_db_instance.b", "aws_db_instance", { storage_encrypted: false, kms_key_id: "arn:aws:kms:eu-west-1:1:key/x" })] });
+  assert.equal(kms.resources[0]!["encrypted"], true);
+  const none = fromTerraformPlan({ resource_changes: [rc("aws_db_instance.c", "aws_db_instance", { storage_encrypted: null, kms_key_id: null })] });
+  assert.deepEqual(evaluate(none.resources).findings.map((f) => f.ruleId), ["db-no-encryption"]);
+});

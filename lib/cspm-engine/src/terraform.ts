@@ -78,8 +78,6 @@ export function fromTerraformPlan(input: unknown): TerraformResult {
   const unknownAt = (c: Json, key: string) => obj(c.change.after_unknown)?.[key] === true;
   const get = (c: Json, key: string) => { if (unknownAt(c, key)) { unknownValues++; return undefined; } return c.change.after[key]; };
 
-  const byBase = new Map<string, Json[]>();
-  for (const c of live) { const b = base(String(c.address)); byBase.set(b, [...(byBase.get(b) ?? []), c]); }
   /** resources of a type whose attribute points at the given resource */
   const pointingAt = (type: string, attr: string, target: string): Json[] =>
     live.filter((c) => c.type === type && (refs.get(base(String(c.address)))?.get(attr) ?? []).includes(base(target)));
@@ -126,8 +124,11 @@ export function fromTerraformPlan(input: unknown): TerraformResult {
         break;
       }
       case "aws_db_instance": case "aws_rds_cluster": {
-        const r: Resource = { type: "database", name: address, encrypted: get(c, "storage_encrypted") === true || !!get(c, "kms_key_id") };
-        if (c.type === "aws_db_instance") r["publicly_accessible"] = get(c, "publicly_accessible") === true;
+        const enc = get(c, "storage_encrypted"), kms = get(c, "kms_key_id");
+        const r: Resource = { type: "database", name: address };
+        if (enc === true || kms) r["encrypted"] = true;
+        else if (!unknownAt(c, "storage_encrypted") && !unknownAt(c, "kms_key_id")) r["encrypted"] = false; // never guessed from a value the plan cannot know yet
+        if (c.type === "aws_db_instance") { const pub = get(c, "publicly_accessible"); if (pub !== undefined) r["publicly_accessible"] = pub === true; }
         const env = envOf(after["tags"] ?? after["tags_all"]); if (env) r["environment"] = env;
         out.push(r); break;
       }

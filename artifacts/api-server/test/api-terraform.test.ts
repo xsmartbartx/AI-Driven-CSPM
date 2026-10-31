@@ -119,3 +119,46 @@ test("the CI command-line checker: exit 1 on findings, 0 when it passes, 2 when 
   assert.equal((await run("plan.json", [], { CSPM_API_KEY: "" })).status, 2);                 // no key
   assert.equal((await run("missing.json")).status, 2);
 });
+
+test("the CI checker sends no secrets, refuses redirects and odd answers, and rejects a flag without a value", async () => {
+  const { execFile } = await import("node:child_process");
+  const { createServer } = await import("node:http");
+  const { writeFileSync, mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "tfplan-"));
+  writeFileSync(join(dir, "plan.json"), JSON.stringify({ resource_changes: [
+    { address: "aws_db_instance.db", mode: "managed", type: "aws_db_instance", change: { actions: ["create"], after: { publicly_accessible: true, storage_encrypted: true, password: "hunter2-secret", username: "admin", kms_key_id: "arn:aws:kms:eu-west-1:111122223333:key/abc", tags: { Environment: "production", Owner: "alice@example.com", Token: "t0ken" } }, after_unknown: {}, after_sensitive: { password: true } } },
+    { address: "aws_lambda_function.fn", mode: "managed", type: "aws_lambda_function", change: { actions: ["create"], after: { environment: { variables: { API_KEY: "leaky" } } }, after_unknown: {} } },
+  ], configuration: { root_module: { resources: [] } } }));
+  const seen: string[] = []; let hits = 0; let mode: "ok" | "redirect" | "html" = "ok";
+  const target = createServer((rq, rs) => { hits++; let b = ""; rq.on("data", (d) => (b += d)); rq.on("end", () => { seen.push(b); rs.end("{}"); }); }).listen(0);
+  const fake = createServer((rq, rs) => {
+    let b = ""; rq.on("data", (d) => (b += d)); rq.on("end", () => {
+      if (mode === "redirect") { rs.writeHead(307, { location: `http://127.0.0.1:${(target.address() as any).port}/steal` }); return void rs.end(); }
+      if (mode === "html") { rs.writeHead(200, { "content-type": "text/html" }); return void rs.end("<html>Welcome to the captive portal</html>"); }
+      seen.push(b); rs.writeHead(200, { "content-type": "application/json" }); rs.end(JSON.stringify({ resourceCount: 1, counts: { critical: 0, high: 1, medium: 0, low: 0 }, suppressed: 0, fail: true, failOn: "high", findings: [{ severity: "high", address: "aws_db_instance.db", title: "t", remediation: "r" }], skipped: [], notes: [] }));
+    });
+  }).listen(0);
+  const api = `http://127.0.0.1:${(fake.address() as any).port}`;
+  const raw = (args: string[]) => new Promise<{ status: number; stdout: string; stderr: string }>((resolve) =>
+    execFile(process.execPath, [join(import.meta.dirname, "../../../deploy/tf-check.mjs"), ...args], { env: { ...process.env, CSPM_API_KEY: "cspm_test" }, encoding: "utf8" },
+      (err, stdout, stderr) => resolve({ status: err ? Number((err as any).code ?? 1) : 0, stdout, stderr })));
+  const run = (extra: string[] = [], file = "plan.json") => new Promise<{ status: number; stdout: string; stderr: string }>((resolve) =>
+    execFile(process.execPath, [join(import.meta.dirname, "../../../deploy/tf-check.mjs"), join(dir, file), "--api", api, ...extra], { env: { ...process.env, CSPM_API_KEY: "cspm_test" }, encoding: "utf8" },
+      (err, stdout, stderr) => resolve({ status: err ? Number((err as any).code ?? 1) : 0, stdout, stderr })));
+  try {
+    const ok = await run();
+    assert.equal(ok.status, 1, ok.stdout + ok.stderr);
+    const sent = seen[0]!;
+    for (const secret of ["hunter2-secret", "admin", "alice@example.com", "t0ken", "leaky", "arn:aws:kms", "aws_lambda_function"]) assert.equal(sent.includes(secret), false, `${secret} must not be sent`);
+    assert.ok(sent.includes('"publicly_accessible":true') && sent.includes('"Environment":"production"')); // what the rules read is sent
+    mode = "redirect";
+    const red = await run(); assert.equal(red.status, 2); assert.equal(hits, 0, "the plan must not follow a redirect");
+    mode = "html";
+    const html = await run(); assert.equal(html.status, 2); assert.match(html.stderr, /unexpected response/);
+    mode = "ok";
+    for (const bad of [["--fail-on"], ["--fail-on", "--api", api], ["--fail-on", "extreme"]]) { const r = await run(bad); assert.equal(r.status, 2, JSON.stringify(bad)); }
+    const noApi = await raw([join(dir, "plan.json"), "--api"]); assert.equal(noApi.status, 2); assert.match(noApi.stderr, /--api needs a value/); // not the default endpoint
+  } finally { target.close(); fake.close(); }
+});

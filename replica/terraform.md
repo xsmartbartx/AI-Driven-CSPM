@@ -9,7 +9,9 @@ CSPM_API_KEY=cspm_... node deploy/tf-check.mjs plan.json            # fails on h
 CSPM_API_KEY=cspm_... node deploy/tf-check.mjs plan.json --fail-on medium --api https://api.cspm.onenexora.com
 ```
 
-Exit code **0** passed, **1** findings at or above `--fail-on` (default `high`), **2** the check could not run (bad key, unreachable, unreadable plan). A **read-only** API key (Settings → API keys → Read only) is enough. The script has no dependencies (Node 18+) and sends only the resource types the rules read.
+**Keep `plan.json` and `tfplan` out of version control and CI artifacts.** A plan can hold secrets in plain text (database passwords, tokens). `.gitignore` in this repository excludes them; add the same to yours. `tf-check.mjs` removes everything the rules do not read before sending (it sends no passwords or other attribute values, only the few settings checked, the `Environment` tag and policy documents), and refuses redirects.
+
+Exit code **0** passed, **1** findings at or above `--fail-on` (default `high`), **2** the check could not run (bad key, unreachable, unreadable plan, a flag without a value, an unexpected response). A **read-only** API key (Settings → API keys → Read only) is enough. The script has no dependencies (Node 18+) and sends only the resource types the rules read.
 
 GitHub Actions:
 
