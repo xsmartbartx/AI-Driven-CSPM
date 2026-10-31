@@ -142,6 +142,7 @@ export const RESOURCE_TYPES = [...new Set(RULES.map((r) => r.resourceType))];
 /** Accepted in a scan and stored, but have no rules of their own: they only describe relationships for attack paths. */
 export const RELATIONAL_TYPES = ["ec2_instance", "iam_role"];
 export * from "./paths";
+export * from "./terraform";
 
 export function severityOf(score: number): Severity {
   return score >= 76 ? "critical" : score >= 51 ? "high" : score >= 21 ? "medium" : "low";

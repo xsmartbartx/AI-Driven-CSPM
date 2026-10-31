@@ -40,4 +40,4 @@ Nexora SOC2/ISO certification,skip,could,no,skip,organisational not code
 Email verification + password reset + invite emails,auth,should,no,partial,"built on Resend, mocked-provider tests pass; needs your Resend account, verified domain and key before it sends"
 Account deletion + sign out everywhere,auth,should,no,yes,tested
 Suppress a rule for one asset or tag (noise control),findings,should,no,yes,"built: admin suppresses a rule for one asset, one environment or everywhere, with reason and optional expiry; hidden from score, compliance and alerts; reopens on removal or expiry (migration 0009); see replica/suppressions.md; no tag-based scope (environment only)"
-Terraform plan JSON pre-deploy scan (CI),integrations,could,no,no,from entrepreneur: thin evidence (1 comment on tool consolidation); reuses the same engine
+Terraform plan JSON pre-deploy scan (CI),integrations,could,no,yes,"built: POST /terraform/check + deploy/tf-check.mjs (exit codes for CI) reading S3 ACLs, security groups, IAM policies and RDS from a plan; nothing stored; see replica/terraform.md; no attack paths or tag-based suppression from plans"

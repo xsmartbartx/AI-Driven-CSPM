@@ -201,7 +201,8 @@ test("two simultaneous scans of the same account: the second is refused, the fir
   const id = await connected(c);
   aws.delayMs = 250; aws.result = { resources: [bucket("slow")], notes: [], complete: true };
   const [a, b] = await Promise.all([c.post(`/cloud-accounts/${id}/scan`), c.post(`/cloud-accounts/${id}/scan`)]); // truly simultaneous: exactly one may run
-  assert.deepEqual([a.status, b.status], [201, 409]); assert.equal(b.json.error.code, "scan_running");
+  assert.deepEqual([a.status, b.status].sort(), [201, 409]); // which of the two wins is up to the database
+  assert.equal([a, b].find((x) => x.status === 409)!.json.error.code, "scan_running");
   assert.equal((await c.post(`/cloud-accounts/${id}/scan`)).status, 201); // and it can run again afterwards
 });
 

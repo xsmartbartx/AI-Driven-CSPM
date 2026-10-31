@@ -12,6 +12,7 @@ import cloudRouter from "./routes/cloud";
 import pathsRouter from "./routes/paths";
 import notificationsRouter from "./routes/notifications";
 import suppressionsRouter from "./routes/suppressions";
+import terraformRouter from "./routes/terraform";
 import healthRouter from "./routes/health";
 import authRouter from "./routes/auth";
 import scansRouter from "./routes/scans";
@@ -43,7 +44,9 @@ export function createApp(db: Db, opts: { mailer?: Mailer; aws?: AwsConnector; f
   });
   // exact origins only, with credentials. Unlisted origins get no CORS headers.
   app.use(cors({ origin: (o, cb) => cb(null, !o || config.origins.includes(o)), credentials: true, allowedHeaders: ["content-type", "x-csrf", "authorization"], methods: ["GET", "POST", "PUT", "PATCH", "DELETE"] }));
-  app.use(express.json({ limit: "1mb", verify: (req, _res, buf) => { (req as Request).rawBody = buf; } }));
+  const json = express.json({ limit: "1mb", verify: (req, _res, buf) => { (req as Request).rawBody = buf; } });
+  // Terraform plans are large: that route reads its own, bigger body, but only after the caller is authenticated and rate limited
+  app.use((req, res, next) => (req.path.startsWith("/api/terraform/") ? next() : json(req, res, next)));
   app.use((req, res, next) => {
     req.db = db; req.sysDb = db; req.mailer = mailer; req.aws = aws; req.notifyFetch = opts.fetch;
     // "close" also fires when the client disconnects mid-request: the final release waits for any query or transaction
@@ -52,7 +55,7 @@ export function createApp(db: Db, opts: { mailer?: Mailer; aws?: AwsConnector; f
     next();
   });
 
-  app.use("/api", healthRouter, authRouter, scansRouter, findingsRouter, teamRouter, cloudRouter, pathsRouter, notificationsRouter, suppressionsRouter);
+  app.use("/api", healthRouter, authRouter, scansRouter, findingsRouter, teamRouter, cloudRouter, pathsRouter, notificationsRouter, suppressionsRouter, terraformRouter);
   app.use("/api", (_req, _res, next) => next(new HttpError(404, "not_found", "Unknown endpoint")));
 
   app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
