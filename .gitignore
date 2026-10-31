@@ -47,3 +47,8 @@ replica/screens/
 e2e/test-results
 e2e/playwright-report
 deploy/oci/local-test.vars
+
+# Terraform plans can contain secrets in plain text
+tfplan
+*.tfplan
+plan.json
