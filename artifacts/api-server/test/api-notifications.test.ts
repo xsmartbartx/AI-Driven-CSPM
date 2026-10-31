@@ -77,7 +77,8 @@ test("email and Slack on: the first scan alerts, the same scan again does not, a
   assert.match(sent[0].text, /CRITICAL: /); assert.doesNotMatch(sent[0].text, /MEDIUM|LOW/);
   assert.equal(slack.length, 1); assert.equal(slack[0]!.url, HOOK);
   assert.match(slack[0]!.body.text, /\*CRITICAL\*/); assert.match(slack[0]!.body.text, /Open findings/);
-  assert.ok((await c.get("/notifications")).json.lastSentAt);
+  let sentAt: unknown; for (let i = 0; i < 100 && !sentAt; i++) { sentAt = (await c.get("/notifications")).json.lastSentAt; if (!sentAt) await new Promise((r) => setTimeout(r, 20)); } // recorded just after the sends
+  assert.ok(sentAt);
   reset();
   await c.post("/scans", { config: SAMPLE_PATHS_CONFIG() }); // nothing new
   await new Promise((r) => setTimeout(r, 150));
