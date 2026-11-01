@@ -357,3 +357,8 @@ grant select, insert, update, delete on suppressions to cspm_app;
 alter table suppressions enable row level security;
 drop policy if exists tenant_isolation on suppressions;
 create policy tenant_isolation on suppressions to cspm_app using (org_id = app_org()) with check (org_id = app_org());
+
+-- ===== 0010_daily_digest =====
+-- Optional daily summary email to owners and admins, alongside the per-scan alerts.
+alter table notification_settings add column if not exists daily_digest boolean not null default false;
+alter table notification_settings add column if not exists last_digest_at timestamptz;

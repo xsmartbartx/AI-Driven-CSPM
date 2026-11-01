@@ -19,7 +19,7 @@ Risk trend snapshots 30d/3m/6m,dashboard,should,no,yes,RiskSnapshot daily
 Asset inventory,assets,should,no,yes,S11
 Compliance frameworks (CIS NIST ISO PCI GDPR) mapped by control ID,compliance,should,no,yes,S12 no licensed text
 AI explanation per finding,ai,should,no,yes,rule-grounded text; LLM used only if ANTHROPIC_API_KEY set (untested live)
-AI daily security brief,ai,could,no,no,S14
+AI daily security brief,ai,could,no,partial,"built without a model: Overview card + GET /brief + optional daily email (migration 0010) summarise what changed from stored findings; see replica/daily-summary.md; no LLM wording"
 AI Q&A over own findings,ai,could,no,no,tenant-scoped retrieval
 AWS read-only account connection (role + external ID),integrations,should,roadmap,partial,"built: connect, verify, scan (S3, SG, IAM customer policies, RDS); tested with fakes + mock STS; never run on real AWS, off by default (replica/aws-setup.md)"
 Azure and GCP connectors,integrations,could,no,no,phase 2

@@ -434,6 +434,27 @@ test.describe("F11 attack paths", () => {
   });
 });
 
+test.describe("F14 daily summary", () => {
+  test("F14-H1 the overview says what changed since yesterday, and the daily email can be switched on", async ({ page }) => {
+    await signUp(page);
+    await runSampleScan(page);
+    await page.goto("/");
+    const card = page.locator("section", { has: page.getByRole("heading", { name: "Since yesterday" }) });
+    await expect(card).toContainText(/open findings?/);
+    await expect(card).toContainText(/new findings? in the last day/);
+    await expect(card.getByRole("link").first()).toBeVisible(); // the new findings link to their pages
+    await a11y(page, "overview with summary");
+    await page.goto("/settings");
+    const box = page.getByLabel("Daily summary email (owners and admins, only when there is news)");
+    await expect(box).not.toBeChecked();
+    await box.click(); // the box follows the saved setting, so it changes once the save is back
+    await expect(box).toBeChecked();
+    await expect(page.getByText("Saved")).toBeVisible();
+    await page.reload();
+    await expect(box).toBeChecked();
+  });
+});
+
 test.describe("F13 rule suppression", () => {
   test("F13-H1 suppress a rule from a finding: it leaves the open list and the score counts, shows in Settings, and removing it brings the finding back", async ({ page }) => {
     await signUp(page);
