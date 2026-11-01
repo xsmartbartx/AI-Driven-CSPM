@@ -118,7 +118,8 @@ r.get("/assets", requireRole("viewer"), async (req, res) => {
 r.get("/compliance", requireRole("viewer"), async (req, res) => {
   await refreshSuppressions(req.db, req.auth!.orgId);
   const { rows } = await req.db.query("select distinct rule_id from findings where org_id = $1 and status = 'open'", [req.auth!.orgId]);
-  const frameworks = complianceFrom(rows.map((x) => x.rule_id));
+  const types = (await req.db.query("select distinct type from assets where org_id = $1", [req.auth!.orgId])).rows.map((x) => x.type as string);
+  const frameworks = complianceFrom(rows.map((x) => x.rule_id), types);
   const titles = Object.fromEntries(frameworks.flatMap((f) => f.failedControls.flatMap((c) => c.ruleIds)).map((id) => [id, ruleById(id)?.title ?? id]));
   res.json({ frameworks, ruleTitles: titles, note: "Control IDs are indicative mappings from this scanner's rules. They are not an audit result. Check them against the benchmark version you are audited against." });
 });

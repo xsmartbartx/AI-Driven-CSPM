@@ -13,6 +13,7 @@ import pathsRouter from "./routes/paths";
 import notificationsRouter from "./routes/notifications";
 import suppressionsRouter from "./routes/suppressions";
 import terraformRouter from "./routes/terraform";
+import kubernetesRouter from "./routes/kubernetes";
 import openapiRouter from "./routes/openapi";
 import briefRouter from "./routes/brief";
 import healthRouter from "./routes/health";
@@ -48,7 +49,7 @@ export function createApp(db: Db, opts: { mailer?: Mailer; aws?: AwsConnector; f
   app.use(cors({ origin: (o, cb) => cb(null, !o || config.origins.includes(o)), credentials: true, allowedHeaders: ["content-type", "x-csrf", "authorization"], methods: ["GET", "POST", "PUT", "PATCH", "DELETE"] }));
   const json = express.json({ limit: "1mb", verify: (req, _res, buf) => { (req as Request).rawBody = buf; } });
   // Terraform plans are large: that route reads its own, bigger body, but only after the caller is authenticated and rate limited
-  app.use((req, res, next) => (req.path.startsWith("/api/terraform/") ? next() : json(req, res, next)));
+  app.use((req, res, next) => (req.path.startsWith("/api/terraform/") || req.path.startsWith("/api/kubernetes/") ? next() : json(req, res, next)));
   app.use((req, res, next) => {
     req.db = db; req.sysDb = db; req.mailer = mailer; req.aws = aws; req.notifyFetch = opts.fetch;
     // "close" also fires when the client disconnects mid-request: the final release waits for any query or transaction
@@ -57,7 +58,7 @@ export function createApp(db: Db, opts: { mailer?: Mailer; aws?: AwsConnector; f
     next();
   });
 
-  app.use("/api", healthRouter, authRouter, scansRouter, findingsRouter, teamRouter, cloudRouter, pathsRouter, notificationsRouter, suppressionsRouter, terraformRouter, openapiRouter, briefRouter);
+  app.use("/api", healthRouter, authRouter, scansRouter, findingsRouter, teamRouter, cloudRouter, pathsRouter, notificationsRouter, suppressionsRouter, terraformRouter, kubernetesRouter, openapiRouter, briefRouter);
   app.use("/api", (_req, _res, next) => next(new HttpError(404, "not_found", "Unknown endpoint")));
 
   app.use((err: any, req: Request, res: Response, _next: NextFunction) => {

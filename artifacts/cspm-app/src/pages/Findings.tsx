@@ -150,7 +150,8 @@ export function FindingDetail({ id }: { id: string }) {
           <section className="card" aria-labelledby="fix"><h2 className="h2" id="fix">How to fix</h2><p>{f.remediation}</p>
             {f.fix && (
               <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
-                <CodeBlock label="Terraform" code={f.fix.terraform} />
+                {f.fix.terraform && <CodeBlock label="Terraform" code={f.fix.terraform} />}
+                {f.fix.yaml && <CodeBlock label="Kubernetes YAML" code={f.fix.yaml} />}
                 {f.fix.awsCli && <CodeBlock label="AWS CLI" code={f.fix.awsCli} />}
                 {f.fix.notes.length > 0 && <ul className="list muted" style={{ paddingLeft: 20, margin: 0 }}>{f.fix.notes.map((n: string) => <li key={n}>{n}</li>)}</ul>}
                 <p className="muted" style={{ margin: 0 }}>These are starting points written from the rule. Adapt names and settings to your setup and review before applying.</p>
