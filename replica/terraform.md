@@ -35,3 +35,8 @@ GitHub Actions:
 - Attack paths are not computed from plans.
 - Rule suppressions that apply everywhere, or to an environment (read from the resource's `Environment` tag), are honoured; suppressions for one asset are not, because plan addresses are not account assets.
 - API: `POST /api/terraform/check` with `{ "plan": <json>, "failOn": "high" }` (viewer role or a read-only key); request bodies up to 8 MB, 60 checks an hour per organization.
+
+## Fixes as code
+Every finding also carries a **fix as code**: a Terraform snippet and, where one command does it, an AWS CLI command, with the caveats (for example that encrypting an existing database means replacing it). They show on the finding page with copy buttons, in `GET /api/findings/:id` (`fix`) and in each `terraform/check` finding. `node deploy/tf-check.mjs plan.json --show-fixes` prints the Terraform under each finding.
+
+They are starting points written from the rule and the finding's evidence: adapt resource names and settings, and review before applying. Names come from your configuration and are reduced to safe identifiers and plain-character strings, so a hostile resource name cannot inject code into a snippet you paste. A test fails if a new rule is added without a fix.

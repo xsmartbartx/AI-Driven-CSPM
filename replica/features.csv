@@ -23,12 +23,12 @@ AI daily security brief,ai,could,no,partial,"built without a model: Overview car
 AI Q&A over own findings,ai,could,no,no,tenant-scoped retrieval
 AWS read-only account connection (role + external ID),integrations,should,roadmap,partial,"built: connect, verify, scan (S3, SG, IAM customer policies, RDS); tested with fakes + mock STS; never run on real AWS, off by default (replica/aws-setup.md)"
 Azure and GCP connectors,integrations,could,no,no,phase 2
-Kubernetes checks,integrations,could,no,no,phase 2
+Kubernetes checks,integrations,could,no,partial,"built: 6 workload rules, manifest converter, POST /kubernetes/check + deploy/k8s-check.mjs for CI, YAML fixes, pasted k8s_workload scans; manifests only, no cluster connection; see replica/kubernetes.md"
 Attack path analysis,attack-paths,could,no,partial,"built: internet -> server -> role -> account/bucket and server -> database; from pasted servers/roles or a connected AWS account (new role permissions); heuristic score, choke points; never run on real AWS; see replica/attack-paths.md"
 Executive PDF/CSV reports,reports,could,no,yes,"Report page (score, trend, top findings, attack paths, compliance) with print / save as PDF via the browser, plus the findings CSV; optional Monday email with the week brief and top risks (migration 0011); no PDF attachment"
 Notifications (email Slack),notify,could,no,partial,"built: new critical/high findings alert owners and admins by email and/or a Slack webhook after any scan (migration 0008); see replica/notifications.md; email needs the mail provider live"
 API keys and public REST API,api,should,partial,yes,"read-only or scan keys with optional expiry (migration 0007); OpenAPI 3.1 description at /api/openapi.json, checked against the real routes and roles by a test; guide in replica/api.md; no SDKs, no webhooks"
-Terraform fix generation and PR,remediation,could,no,no,phase 3
+Terraform fix generation and PR,remediation,could,no,partial,"built: Terraform + AWS CLI snippet per rule on the finding page, in the API and in tf-check --show-fixes; sanitised names; no pull requests opened (needs a GitHub app with write access)"
 Internal admin portal,admin,could,no,no,separate surface
 Light and dark theme,design,should,no,yes,Apple-style tokens
 Microsoft Secure Score algorithm,skip,could,yes,skip,proprietary; own score instead

@@ -2,6 +2,8 @@
 
 export type Severity = "critical" | "high" | "medium" | "low";
 
+import { K8S_RULES } from "./kubernetes";
+
 export interface Resource {
   type: string;
   name: string;
@@ -64,6 +66,7 @@ const svcWildAction = (s: Statement) => arr(s.actions).some((a) => typeof a === 
 const wildRes = (s: Statement) => arr(s.resources).some((a) => a === "*");
 
 export const RULES: Rule[] = [
+  ...K8S_RULES,
   {
     id: "s3-public-read", title: "Storage bucket is publicly readable", resourceType: "s3_bucket", base: 85,
     remediation: "Turn on 'block public access' for the bucket and account, remove public ACLs and policy statements that grant access to everyone, and serve public content through a CDN with origin access instead.",
@@ -143,6 +146,8 @@ export const RESOURCE_TYPES = [...new Set(RULES.map((r) => r.resourceType))];
 export const RELATIONAL_TYPES = ["ec2_instance", "iam_role"];
 export * from "./paths";
 export * from "./terraform";
+export * from "./fixes";
+export * from "./kubernetes";
 
 export function severityOf(score: number): Severity {
   return score >= 76 ? "critical" : score >= 51 ? "high" : score >= 21 ? "medium" : "low";
@@ -218,10 +223,18 @@ export function ruleById(id: string) { return RULES.find((r) => r.id === id); }
 
 export interface FrameworkCoverage { framework: string; controls: number; failed: number; coverage: number; failedControls: { control: string; ruleIds: string[] }[] }
 /** Controls are the control IDs the rule set maps to. A control fails if any open finding maps to it. */
-export function complianceFrom(openRuleIds: Iterable<string>): FrameworkCoverage[] {
+/** The AWS resource types every organization is measured against, whether or not it has scanned them yet. */
+export const BASELINE_TYPES = ["s3_bucket", "security_group", "iam_policy", "database"];
+
+/**
+ * Coverage per framework. Only the rules for the baseline types and for `extraTypes` (the kinds of asset the organization
+ * actually has, for example k8s_workload) count: a framework is not reported as 100% passing for something never scanned.
+ */
+export function complianceFrom(openRuleIds: Iterable<string>, extraTypes: Iterable<string> = []): FrameworkCoverage[] {
   const open = new Set(openRuleIds);
+  const types = new Set([...BASELINE_TYPES, ...extraTypes]);
   const byFw = new Map<string, Map<string, Set<string>>>();
-  for (const rule of RULES) for (const f of rule.frameworks) {
+  for (const rule of RULES) if (types.has(rule.resourceType)) for (const f of rule.frameworks) {
     const i = f.indexOf(" ");
     const fw = f.slice(0, i), control = f.slice(i + 1);
     if (!byFw.has(fw)) byFw.set(fw, new Map());

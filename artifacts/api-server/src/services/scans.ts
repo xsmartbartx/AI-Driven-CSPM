@@ -164,7 +164,7 @@ export async function overview(q: Queryable, orgId: string, days: number) {
     `select f.id, f.title, f.severity, f.risk_score as "riskScore", a.name as "assetName", a.type as "assetType", a.provider
      from findings f join assets a on a.id = f.asset_id where f.org_id = $1 and f.status = 'open' order by f.risk_score desc, f.created_at limit 5`, [orgId]);
   const { rows: rules } = await q.query("select distinct rule_id from findings where org_id = $1 and status = 'open'", [orgId]);
-  const comp = complianceFrom(rules.map((r) => r.rule_id));
+  const comp = complianceFrom(rules.map((r) => r.rule_id), byType.map((t) => t.type));
   const { rows: sc } = await q.query("select count(*)::int as n from scans where org_id = $1", [orgId]);
   const { rows: last } = await q.query("select id, created_at as \"createdAt\", score, finding_count as \"findingCount\" from scans where org_id = $1 order by created_at desc limit 1", [orgId]);
   return {

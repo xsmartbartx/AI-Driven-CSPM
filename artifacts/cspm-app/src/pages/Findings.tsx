@@ -147,7 +147,17 @@ export function FindingDetail({ id }: { id: string }) {
           <section className="card" aria-labelledby="ev"><h2 className="h2" id="ev">What we found</h2>
             <dl className="kv">{Object.entries(f.evidence).map(([k, v]) => <Fragment key={k}><dt>{k.replace(/_/g, " ")}</dt><dd>{Array.isArray(v) ? v.join(", ") : String(v)}</dd></Fragment>)}</dl>
           </section>
-          <section className="card" aria-labelledby="fix"><h2 className="h2" id="fix">How to fix</h2><p>{f.remediation}</p></section>
+          <section className="card" aria-labelledby="fix"><h2 className="h2" id="fix">How to fix</h2><p>{f.remediation}</p>
+            {f.fix && (
+              <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
+                {f.fix.terraform && <CodeBlock label="Terraform" code={f.fix.terraform} />}
+                {f.fix.yaml && <CodeBlock label="Kubernetes YAML" code={f.fix.yaml} />}
+                {f.fix.awsCli && <CodeBlock label="AWS CLI" code={f.fix.awsCli} />}
+                {f.fix.notes.length > 0 && <ul className="list muted" style={{ paddingLeft: 20, margin: 0 }}>{f.fix.notes.map((n: string) => <li key={n}>{n}</li>)}</ul>}
+                <p className="muted" style={{ margin: 0 }}>These are starting points written from the rule. Adapt names and settings to your setup and review before applying.</p>
+              </div>
+            )}
+          </section>
           <section className="card" aria-labelledby="ai">
             <div className="row" style={{ justifyContent: "space-between" }}>
               <h2 className="h2" id="ai" style={{ margin: 0 }}>Explanation</h2>
@@ -179,6 +189,19 @@ export function FindingDetail({ id }: { id: string }) {
       {dlg && <StatusDialog kind={dlg} onClose={() => setDlg(null)} onSubmit={setStatus} />}
       {sup && <SuppressDialog f={f} onClose={() => setSup(false)} onDone={(n) => { setSup(false); toast(`Suppressed ${n} ${n === 1 ? "finding" : "findings"}`); reload(); }} />}
     </>
+  );
+}
+
+function CodeBlock({ label, code }: { label: string; code: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div>
+      <div className="row" style={{ justifyContent: "space-between", marginBottom: 4 }}>
+        <strong>{label}</strong>
+        <button className="btn sm" onClick={async () => { try { await navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* clipboard blocked */ } }} aria-label={`Copy the ${label} snippet`}>{copied ? "Copied" : "Copy"}</button>
+      </div>
+      <pre className="code" tabIndex={0} aria-label={`${label} snippet`} style={{ margin: 0, overflowX: "auto" }}>{code}</pre>
+    </div>
   );
 }
 

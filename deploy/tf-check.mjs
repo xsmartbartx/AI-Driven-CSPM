@@ -14,12 +14,13 @@ const flag = (name, dflt) => {
   if (v === undefined || v === "" || v.startsWith("--")) { console.error(`${name} needs a value.`); process.exit(2); }
   args.splice(i, 2); return v;
 };
+const showFixes = args.includes("--show-fixes") && !!args.splice(args.indexOf("--show-fixes"), 1);
 const failOn = flag("--fail-on", "high");
 const api = (flag("--api", process.env.CSPM_API_URL ?? "https://api.cspm.onenexora.com")).replace(/\/$/, "");
 if (!["critical", "high", "medium", "low"].includes(failOn)) { console.error(`--fail-on must be critical, high, medium or low (got "${failOn}").`); process.exit(2); }
 const file = args[0];
 const key = process.env.CSPM_API_KEY;
-if (!file || !key) { console.error("Usage: CSPM_API_KEY=cspm_... node tf-check.mjs plan.json [--fail-on critical|high|medium|low] [--api URL]"); process.exit(2); }
+if (!file || !key) { console.error("Usage: CSPM_API_KEY=cspm_... node tf-check.mjs plan.json [--fail-on critical|high|medium|low] [--show-fixes] [--api URL]"); process.exit(2); }
 
 const TYPES = new Set(["aws_s3_bucket", "aws_s3_bucket_acl", "aws_s3_bucket_public_access_block", "aws_security_group", "aws_security_group_rule", "aws_vpc_security_group_ingress_rule", "aws_iam_policy", "aws_iam_role_policy", "aws_iam_user_policy", "aws_iam_group_policy", "aws_iam_role", "aws_db_instance", "aws_rds_cluster"]);
 let plan;
@@ -64,7 +65,10 @@ if (!res.ok) { console.error(`NEXORA CSPM answered ${res.status}: ${out?.error?.
 // a proxy can answer 200 with a page of its own: that is a check that did not run, not a pass
 if (!out || !Array.isArray(out.findings) || !Array.isArray(out.notes) || typeof out.fail !== "boolean" || !out.counts) { console.error("NEXORA CSPM sent an unexpected response; the check did not run."); process.exit(2); }
 
-for (const f of out.findings) console.log(`${f.severity.toUpperCase().padEnd(8)} ${f.address}  ${f.title}\n         fix: ${f.remediation}`);
+for (const f of out.findings) {
+  console.log(`${f.severity.toUpperCase().padEnd(8)} ${f.address}  ${f.title}\n         fix: ${f.remediation}`);
+  if (showFixes && f.fix?.terraform) console.log(f.fix.terraform.split("\n").map((l) => `           | ${l}`).join("\n"));
+}
 const c = out.counts;
 console.log(`\n${out.resourceCount} resources checked: ${c.critical} critical, ${c.high} high, ${c.medium} medium, ${c.low} low${out.suppressed ? `, ${out.suppressed} suppressed` : ""}.`);
 for (const n of out.notes) console.log(`note: ${n}`);

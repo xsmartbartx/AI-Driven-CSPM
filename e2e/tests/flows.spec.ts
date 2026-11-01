@@ -249,6 +249,16 @@ test.describe("F04-F06 triage, AI explanation, compliance", () => {
     await page.getByLabel("Status").selectOption("accepted");
     await expect(page.getByRole("row")).toHaveCount(2);
   });
+  test("F04-H3 the finding page offers the fix as Terraform and AWS CLI, with copy buttons", async ({ page }) => {
+    await page.goto("/findings");
+    await page.getByRole("link", { name: "Database is publicly accessible" }).click();
+    await expect(page.getByRole("heading", { name: "How to fix" })).toBeVisible();
+    await expect(page.getByLabel("Terraform snippet", { exact: true })).toContainText("publicly_accessible = false");
+    await expect(page.getByLabel("AWS CLI snippet", { exact: true })).toContainText("aws rds modify-db-instance");
+    await expect(page.getByText(/starting points written from the rule/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Copy the Terraform snippet" })).toBeVisible();
+    await a11y(page, "finding with fix as code");
+  });
   test("F04-E1 Escape closes the dialog and returns focus", async ({ page }) => {
     await page.goto("/findings");
     await page.getByRole("link", { name: "Policy grants full administrator access" }).click();

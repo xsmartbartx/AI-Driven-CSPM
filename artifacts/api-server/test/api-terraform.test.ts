@@ -162,3 +162,15 @@ test("the CI checker sends no secrets, refuses redirects and odd answers, and re
     const noApi = await raw([join(dir, "plan.json"), "--api"]); assert.equal(noApi.status, 2); assert.match(noApi.stderr, /--api needs a value/); // not the default endpoint
   } finally { target.close(); fake.close(); }
 });
+
+test("findings and plan checks carry the fix as code", async () => {
+  const c = await signup();
+  const r = await c.post("/terraform/check", { plan: PLAN });
+  const pub = r.json.findings.find((f: any) => f.ruleId === "s3-public-read");
+  assert.match(pub.fix.terraform, /aws_s3_bucket_public_access_block/); assert.ok(pub.fix.notes.length > 0);
+  assert.ok(r.json.findings.every((f: any) => f.fix && f.fix.terraform), "every rule has a fix");
+  await c.post("/scans", { config: [{ type: "s3_bucket", name: "open-bucket (b-1)", public_read: true }] });
+  const id = (await c.get("/findings")).json.items[0].id;
+  const d = (await c.get(`/findings/${id}`)).json;
+  assert.match(d.fix.terraform, /"open_bucket_b_1"/); assert.match(d.fix.awsCli, /--bucket "b-1"/);
+});
