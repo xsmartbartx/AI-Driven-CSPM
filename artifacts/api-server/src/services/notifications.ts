@@ -66,50 +66,63 @@ export async function sendTest(d: NotifyDeps, orgId: string, adminEmail: string 
 }
 
 /**
- * The optional daily summary. An organization is claimed (last_digest_at moves) before anything is sent, so several
- * instances never send twice; it goes out after 07:00 UTC, and only when there is something to say.
+ * The optional daily summary and weekly report. Rules that keep delivery safe:
+ * - an organization is claimed one at a time, right before it is processed, so a crash loses at most the one in hand;
+ * - only organizations that have scanned are claimed (otherwise a first scan later the same day would wait a week);
+ * - a claim is atomic (FOR UPDATE SKIP LOCKED), so several instances never send twice;
+ * - a tick stops after a time budget, so slow mail never holds up the scheduled scans that run next to it.
  */
-export async function sendDueDigests(d: NotifyDeps, minHourUtc = 7): Promise<void> {
-  let due: { org_id: string }[] = [];
-  try {
-    due = (await d.db.query(
-      `update notification_settings set last_digest_at = now()
-       where daily_digest and (last_digest_at is null or last_digest_at < now() - interval '23 hours') and extract(hour from now() at time zone 'utc') >= $1
-       returning org_id`, [minHourUtc])).rows as { org_id: string }[];
-  } catch (e) { logger.warn({ err: e instanceof Error ? e.message : String(e) }, "daily digest claim failed"); return; }
-  for (const { org_id: orgId } of due) {
-    try {
-      const brief = await buildBrief(d.db, orgId, 24);
-      const news = brief.newFindings.total > 0 || brief.fixed > 0 || brief.open.critical > 0 || brief.expiring.acceptedRisks > 0 || brief.expiring.suppressions > 0;
-      if (!brief.hasData || !news) continue;
-      const org = (await d.db.query("select name from organizations where id = $1", [orgId])).rows[0]?.name ?? "your organization";
-      const to = (await d.db.query("select u.email from members m join users u on u.id = m.user_id where m.org_id = $1 and m.role in ('owner','admin') order by m.created_at limit $2", [orgId, MAX_RECIPIENTS])).rows;
-      for (const r of to) await d.mailer.send(dailyBriefEmail(r.email, org, brief));
-    } catch (e) { logger.warn({ org: orgId, err: e instanceof Error ? e.message : String(e) }, "daily digest failed"); }
+const BUDGET_MS = 20_000;
+type Kind = { flag: string; at: string; every: string; when: string };
+const DAILY: Kind = { flag: "daily_digest", at: "last_digest_at", every: "23 hours", when: "extract(hour from now() at time zone 'utc') >= $1" };
+const WEEKLY: Kind = { flag: "weekly_report", at: "last_weekly_at", every: "6 days", when: "($2::boolean or extract(isodow from now() at time zone 'utc') = 1) and extract(hour from now() at time zone 'utc') >= $1" };
+
+async function claimNext(db: Db, k: Kind, minHour: number, anyDay: boolean): Promise<string | null> {
+  const params = k === WEEKLY ? [minHour, anyDay] : [minHour];
+  const { rows } = await db.query(
+    `update notification_settings set ${k.at} = now() where org_id = (
+       select n.org_id from notification_settings n
+       where n.${k.flag} and (n.${k.at} is null or n.${k.at} < now() - interval '${k.every}') and ${k.when}
+         and exists (select 1 from scans s where s.org_id = n.org_id)
+       order by n.${k.at} nulls first limit 1 for update skip locked)
+     returning org_id`, params);
+  return (rows[0]?.org_id as string | undefined) ?? null;
+}
+
+async function deliver(d: NotifyDeps, k: Kind, minHour: number, anyDay: boolean, budgetMs: number, send: (orgId: string) => Promise<void>): Promise<void> {
+  const deadline = Date.now() + budgetMs;
+  for (let n = 0; n < 200 && Date.now() < deadline; n++) {
+    let orgId: string | null;
+    try { orgId = await claimNext(d.db, k, minHour, anyDay); }
+    catch (e) { logger.warn({ err: e instanceof Error ? e.message : String(e) }, "report claim failed"); return; }
+    if (!orgId) return;
+    try { await send(orgId); } catch (e) { logger.warn({ org: orgId, err: e instanceof Error ? e.message : String(e) }, "report failed"); }
   }
 }
 
-/**
- * The optional weekly report: Mondays after 07:00 UTC, to owners and admins, once per organization. It is sent even
- * when the week was quiet (a weekly "nothing happened, the score is N" is the point of a report), but not to an
- * organization that has never scanned.
- */
-export async function sendDueWeeklyReports(d: NotifyDeps, minHourUtc = 7, anyDay = false): Promise<void> {
-  let due: { org_id: string }[] = [];
-  try {
-    due = (await d.db.query(
-      `update notification_settings set last_weekly_at = now()
-       where weekly_report and (last_weekly_at is null or last_weekly_at < now() - interval '6 days')
-         and ($2::boolean or extract(isodow from now() at time zone 'utc') = 1) and extract(hour from now() at time zone 'utc') >= $1
-       returning org_id`, [minHourUtc, anyDay])).rows as { org_id: string }[];
-  } catch (e) { logger.warn({ err: e instanceof Error ? e.message : String(e) }, "weekly report claim failed"); return; }
-  for (const { org_id: orgId } of due) {
-    try {
-      const brief = await buildBrief(d.db, orgId, 168, 5);
-      if (!brief.hasData) continue;
-      const org = (await d.db.query("select name from organizations where id = $1", [orgId])).rows[0]?.name ?? "your organization";
-      const to = (await d.db.query("select u.email from members m join users u on u.id = m.user_id where m.org_id = $1 and m.role in ('owner','admin') order by m.created_at limit $2", [orgId, MAX_RECIPIENTS])).rows;
-      for (const r of to) await d.mailer.send(weeklyReportEmail(r.email, org, brief));
-    } catch (e) { logger.warn({ org: orgId, err: e instanceof Error ? e.message : String(e) }, "weekly report failed"); }
-  }
+async function recipients(d: NotifyDeps, orgId: string) {
+  const org = (await d.db.query("select name from organizations where id = $1", [orgId])).rows[0]?.name ?? "your organization";
+  const to = (await d.db.query("select u.email from members m join users u on u.id = m.user_id where m.org_id = $1 and m.role in ('owner','admin') order by m.created_at limit $2", [orgId, MAX_RECIPIENTS])).rows;
+  return { org: org as string, to: to.map((r) => r.email as string) };
+}
+
+/** The optional daily summary: after 07:00 UTC, only when there is something to say. */
+export async function sendDueDigests(d: NotifyDeps, minHourUtc = 7, budgetMs = BUDGET_MS): Promise<void> {
+  await deliver(d, DAILY, minHourUtc, false, budgetMs, async (orgId) => {
+    const brief = await buildBrief(d.db, orgId, 24);
+    const news = brief.newFindings.total > 0 || brief.fixed > 0 || brief.open.critical > 0 || brief.expiring.acceptedRisks > 0 || brief.expiring.suppressions > 0;
+    if (!brief.hasData || !news) return;
+    const { org, to } = await recipients(d, orgId);
+    for (const email of to) await d.mailer.send(dailyBriefEmail(email, org, brief));
+  });
+}
+
+/** The optional weekly report: Mondays after 07:00 UTC. Sent on a quiet week too, but not before the first scan. */
+export async function sendDueWeeklyReports(d: NotifyDeps, minHourUtc = 7, anyDay = false, budgetMs = BUDGET_MS): Promise<void> {
+  await deliver(d, WEEKLY, minHourUtc, anyDay, budgetMs, async (orgId) => {
+    const brief = await buildBrief(d.db, orgId, 168, 5);
+    if (!brief.hasData) return;
+    const { org, to } = await recipients(d, orgId);
+    for (const email of to) await d.mailer.send(weeklyReportEmail(email, org, brief));
+  });
 }
