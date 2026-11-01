@@ -9,6 +9,7 @@ const { openDb } = await import("@workspace/db");
 const { createApp } = await import("../src/app.ts");
 const { resetRateLimits } = await import("../src/lib/ratelimit.ts");
 const { sendDueDigests, sendDueWeeklyReports } = await import("../src/services/notifications.ts");
+const { schedulerEnabled } = await import("../src/config.ts");
 
 let server: Server;
 let base: string;
@@ -145,4 +146,26 @@ test("the weekly report: off by default, once a week to owners and admins, even 
   const isMonday = new Date().getUTCDay() === 1;
   await sendDueWeeklyReports({ db, mailer }, 0, false);
   assert.equal(sent.length, isMonday ? 1 : 0, "outside Mondays nothing goes out");
+});
+
+test("the weekly report lists the new findings the brief mentions and five top risks, not three", async () => {
+  const a = await signup();
+  await a.c.post("/scans", { config: Array.from({ length: 7 }, (_, i) => bucket(`pub${i}`)) });
+  await a.c.put("/notifications", { weeklyReport: true });
+  sent.length = 0;
+  await sendDueWeeklyReports({ db, mailer }, 0, true);
+  const mine = sent.filter((m) => m.to === a.email); // other organizations in this database may have a report due too
+  assert.equal(mine.length, 1);
+  const text: string = mine[0].text;
+  assert.match(text, /7 new findings this week, the 5 highest are listed/);
+  assert.equal((text.match(/^New: /gm) ?? []).length, 5);                                       // what the sentence promises
+  assert.equal((text.match(/^\d\. /gm) ?? []).length, 5);                                        // five top risks
+  assert.equal((await a.c.get("/brief")).json.topRisks.length, 3);                             // the dashboard brief keeps three
+});
+
+test("the background tick (suppression expiry, daily summary, weekly report) does not depend on AWS being configured", () => {
+  assert.equal(schedulerEnabled({}), true);                                                     // no CSPM_AWS_ACCOUNT_ID
+  assert.equal(schedulerEnabled({ CSPM_AWS_ACCOUNT_ID: "123456789012" }), true);
+  assert.equal(schedulerEnabled({ SCHEDULER: "0" }), false);                                    // and it can still be switched off
+  assert.equal(schedulerEnabled({ SCHEDULER: "1" }), true);
 });

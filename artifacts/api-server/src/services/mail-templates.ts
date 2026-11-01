@@ -49,9 +49,10 @@ export const dailyBriefEmail = (to: string, orgName: string, brief: { headline: 
     { label: "Open the dashboard", url: `${base()}/` },
     "You get this once a day because the daily summary is on for your organization. Turn it off under Settings, Notifications.");
 
-export const weeklyReportEmail = (to: string, orgName: string, brief: { lines: string[]; score: number | null; topRisks: { title: string; severity: string; assetName: string; riskScore: number }[] }): Mail =>
+export const weeklyReportEmail = (to: string, orgName: string, brief: { lines: string[]; score: number | null; newFindings: { items: { title: string; severity: string; assetName: string }[] }; topRisks: { title: string; severity: string; assetName: string; riskScore: number }[] }): Mail =>
   layout(to, `${orgName}: your week in cloud security${brief.score !== null ? ` (score ${brief.score})` : ""}`,
     [...brief.lines.map((l) => l.replace(/ in the last week/, " this week")),
+      ...brief.newFindings.items.map((f) => `New: ${f.severity.toUpperCase()} ${f.title} (${f.assetName})`),
       ...(brief.topRisks.length ? ["Highest risks right now:"] : []),
       ...brief.topRisks.map((f, i) => `${i + 1}. ${f.severity.toUpperCase()} ${f.title} on ${f.assetName} (risk ${f.riskScore})`)],
     { label: "Open the report", url: `${base()}/report` },

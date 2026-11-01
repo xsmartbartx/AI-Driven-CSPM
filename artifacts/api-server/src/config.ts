@@ -16,6 +16,13 @@ export const PLANS = {
 } as const;
 export type PlanId = keyof typeof PLANS;
 
+/**
+ * The background tick runs scheduled AWS scans (only when the AWS connector is configured: runDueScans does nothing
+ * otherwise), expires rule suppressions and sends the daily summary and weekly report. The last three do not depend on
+ * AWS, so the tick runs whenever it is not switched off with SCHEDULER=0.
+ */
+export const schedulerEnabled = (env: Record<string, string | undefined>): boolean => env["SCHEDULER"] !== "0";
+
 export const config = {
   prod,
   port: Number(process.env["PORT"] ?? 8080),
@@ -40,7 +47,7 @@ export const config = {
   /** NEXORA's own AWS account id (12 digits). Set it to enable AWS connections; the process also needs AWS credentials that may call sts:AssumeRole. */
   awsAccountId: process.env["CSPM_AWS_ACCOUNT_ID"] ?? "",
   /** Automatic scans of connected AWS accounts. On whenever the AWS connector is enabled, unless SCHEDULER=0 (e.g. on extra instances). */
-  scheduler: process.env["SCHEDULER"] !== "0" && !!process.env["CSPM_AWS_ACCOUNT_ID"],
+  scheduler: schedulerEnabled(process.env),
   schedulerTickSeconds: Math.max(10, Number(process.env["SCHEDULER_TICK_SECONDS"] ?? 60) || 60),
   resendKey: process.env["RESEND_API_KEY"] ?? "",
   mailFrom: process.env["MAIL_FROM"] ?? "NEXORA CSPM <no-reply@cspm.onenexora.com>",

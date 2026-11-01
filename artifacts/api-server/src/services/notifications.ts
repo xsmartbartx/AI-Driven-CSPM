@@ -105,7 +105,7 @@ export async function sendDueWeeklyReports(d: NotifyDeps, minHourUtc = 7, anyDay
   } catch (e) { logger.warn({ err: e instanceof Error ? e.message : String(e) }, "weekly report claim failed"); return; }
   for (const { org_id: orgId } of due) {
     try {
-      const brief = await buildBrief(d.db, orgId, 168);
+      const brief = await buildBrief(d.db, orgId, 168, 5);
       if (!brief.hasData) continue;
       const org = (await d.db.query("select name from organizations where id = $1", [orgId])).rows[0]?.name ?? "your organization";
       const to = (await d.db.query("select u.email from members m join users u on u.id = m.user_id where m.org_id = $1 and m.role in ('owner','admin') order by m.created_at limit $2", [orgId, MAX_RECIPIENTS])).rows;
