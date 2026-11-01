@@ -3,7 +3,8 @@ import type { Severity } from "@workspace/cspm-engine";
 import { config } from "../config";
 import { logger } from "../lib/logger";
 import type { Mailer } from "./mail";
-import { securityAlertEmail } from "./mail-templates";
+import { dailyBriefEmail, securityAlertEmail } from "./mail-templates";
+import { buildBrief } from "./brief";
 
 /** A finding that appeared (or came back) in a scan. */
 export interface Alert { title: string; severity: Severity; asset: string; type: string }
@@ -62,4 +63,28 @@ export async function sendTest(d: NotifyDeps, orgId: string, adminEmail: string 
   }
   if (s?.slack_webhook) slack = (await postSlack(s.slack_webhook, slackText("your organization", sample), d.fetchImpl ?? fetch)) ?? "sent";
   return { email, slack };
+}
+
+/**
+ * The optional daily summary. An organization is claimed (last_digest_at moves) before anything is sent, so several
+ * instances never send twice; it goes out after 07:00 UTC, and only when there is something to say.
+ */
+export async function sendDueDigests(d: NotifyDeps, minHourUtc = 7): Promise<void> {
+  let due: { org_id: string }[] = [];
+  try {
+    due = (await d.db.query(
+      `update notification_settings set last_digest_at = now()
+       where daily_digest and (last_digest_at is null or last_digest_at < now() - interval '23 hours') and extract(hour from now() at time zone 'utc') >= $1
+       returning org_id`, [minHourUtc])).rows as { org_id: string }[];
+  } catch (e) { logger.warn({ err: e instanceof Error ? e.message : String(e) }, "daily digest claim failed"); return; }
+  for (const { org_id: orgId } of due) {
+    try {
+      const brief = await buildBrief(d.db, orgId, 24);
+      const news = brief.newFindings.total > 0 || brief.fixed > 0 || brief.open.critical > 0 || brief.expiring.acceptedRisks > 0 || brief.expiring.suppressions > 0;
+      if (!brief.hasData || !news) continue;
+      const org = (await d.db.query("select name from organizations where id = $1", [orgId])).rows[0]?.name ?? "your organization";
+      const to = (await d.db.query("select u.email from members m join users u on u.id = m.user_id where m.org_id = $1 and m.role in ('owner','admin') order by m.created_at limit $2", [orgId, MAX_RECIPIENTS])).rows;
+      for (const r of to) await d.mailer.send(dailyBriefEmail(r.email, org, brief));
+    } catch (e) { logger.warn({ org: orgId, err: e instanceof Error ? e.message : String(e) }, "daily digest failed"); }
+  }
 }

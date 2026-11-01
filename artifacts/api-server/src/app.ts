@@ -14,6 +14,7 @@ import notificationsRouter from "./routes/notifications";
 import suppressionsRouter from "./routes/suppressions";
 import terraformRouter from "./routes/terraform";
 import openapiRouter from "./routes/openapi";
+import briefRouter from "./routes/brief";
 import healthRouter from "./routes/health";
 import authRouter from "./routes/auth";
 import scansRouter from "./routes/scans";
@@ -56,7 +57,7 @@ export function createApp(db: Db, opts: { mailer?: Mailer; aws?: AwsConnector; f
     next();
   });
 
-  app.use("/api", healthRouter, authRouter, scansRouter, findingsRouter, teamRouter, cloudRouter, pathsRouter, notificationsRouter, suppressionsRouter, terraformRouter, openapiRouter);
+  app.use("/api", healthRouter, authRouter, scansRouter, findingsRouter, teamRouter, cloudRouter, pathsRouter, notificationsRouter, suppressionsRouter, terraformRouter, openapiRouter, briefRouter);
   app.use("/api", (_req, _res, next) => next(new HttpError(404, "not_found", "Unknown endpoint")));
 
   app.use((err: any, req: Request, res: Response, _next: NextFunction) => {

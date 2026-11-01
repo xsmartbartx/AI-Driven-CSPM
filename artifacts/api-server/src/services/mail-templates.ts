@@ -43,6 +43,12 @@ export const scheduledScanStoppedEmail = (to: string, orgName: string, account: 
     { label: "Open cloud accounts", url: `${base()}/integrations` },
     "To start automatic scans again, fix the cause, press Verify connection, then choose Daily or Weekly.");
 
+export const dailyBriefEmail = (to: string, orgName: string, brief: { headline: string; lines: string[]; newFindings: { items: { title: string; severity: string; assetName: string }[] } }): Mail =>
+  layout(to, `${orgName}: ${brief.headline}`,
+    [...brief.lines, ...brief.newFindings.items.map((f) => `New: ${f.severity.toUpperCase()} ${f.title} (${f.assetName})`)],
+    { label: "Open the dashboard", url: `${base()}/` },
+    "You get this once a day because the daily summary is on for your organization. Turn it off under Settings, Notifications.");
+
 export const securityAlertEmail = (to: string, orgName: string, alerts: { title: string; severity: string; asset: string }[], listed: number): Mail =>
   layout(to, `${alerts.length} new ${alerts.length === 1 ? "finding" : "findings"} for ${orgName}`,
     [`A scan found ${alerts.length} new ${alerts.length === 1 ? "finding" : "findings"} for ${orgName}.`,

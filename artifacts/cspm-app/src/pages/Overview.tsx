@@ -11,6 +11,7 @@ export function Overview() {
   const { can } = useMe();
   const [range, setRange] = useState<string>("30d");
   const { data, error, loading, reload } = useApi<any>(`/overview?range=${range}`);
+  const brief = useApi<any>("/brief");
 
   return (
     <>
@@ -56,6 +57,18 @@ export function Overview() {
             <Kpi label="Assets scanned" value={data.assets.total} sub={data.assets.byProvider.map((p: any) => `${p.provider.toUpperCase()} ${p.n}`).join(" · ")} />
             <Kpi label="Mapped controls passing" value={`${data.compliance.passing} of ${data.compliance.total}`} sub={<Link href="/compliance">View frameworks</Link>} />
           </section>
+
+          {brief.data?.hasData && (
+            <section className="card" aria-labelledby="brief-h">
+              <h2 className="h2" id="brief-h">Since yesterday</h2>
+              <p style={{ fontWeight: 600, marginBottom: 6 }}>{brief.data.headline}</p>
+              <ul className="list" style={{ paddingLeft: 20, margin: 0 }}>{brief.data.lines.map((l: string) => <li key={l}>{l}</li>)}</ul>
+              {brief.data.newFindings.items.length > 0 && (
+                <ul className="list" style={{ listStyle: "none", padding: 0, margin: "10px 0 0" }}>{brief.data.newFindings.items.map((f: any) => (
+                  <li key={f.id}><Sev s={f.severity} /> <Link href={`/findings/${f.id}`}>{f.title}</Link> <span className="muted">· {f.assetName}</span></li>))}</ul>
+              )}
+            </section>
+          )}
 
           <div className="grid g21">
             <section className="card" aria-labelledby="t-h">
