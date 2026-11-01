@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { complianceFrom, ruleById, explain } from "@workspace/cspm-engine";
+import { complianceFrom, fixFor, ruleById, explain } from "@workspace/cspm-engine";
 import { PLANS } from "../config";
 import { parse, requireRole, uuidParam } from "../lib/http";
 import { bad, HttpError, notFound } from "../lib/errors";
@@ -44,7 +44,7 @@ r.get("/findings/:id", requireRole("viewer"), async (req, res) => {
   if (!rows[0]) throw notFound("Finding not found");
   const brief = await req.db.query("select content, model, created_at as \"createdAt\" from ai_briefs where finding_id = $1 and org_id = $2 and kind = 'finding' order by created_at desc limit 1", [id, req.auth!.orgId]);
   const rule = ruleById(rows[0].ruleId);
-  res.json({ ...rows[0], ruleBase: rule?.base ?? null, brief: brief.rows[0] ?? null, ruleExplanation: explain({ ...rows[0], resourceName: rows[0].assetName, resourceType: rows[0].assetType } as any) });
+  res.json({ ...rows[0], ruleBase: rule?.base ?? null, fix: fixFor(rows[0].ruleId, { resourceName: rows[0].assetName, evidence: rows[0].evidence ?? {} }), brief: brief.rows[0] ?? null, ruleExplanation: explain({ ...rows[0], resourceName: rows[0].assetName, resourceType: rows[0].assetType } as any) });
 });
 
 r.patch("/findings/:id", requireRole("analyst"), async (req, res) => {
