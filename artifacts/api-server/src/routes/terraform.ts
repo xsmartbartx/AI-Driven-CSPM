@@ -1,6 +1,6 @@
 import express, { Router } from "express";
 import { z } from "zod";
-import { evaluate, fromTerraformPlan, postureScore, type Severity } from "@workspace/cspm-engine";
+import { evaluate, fixFor, fromTerraformPlan, postureScore, type Severity } from "@workspace/cspm-engine";
 import { parse, requireRole } from "../lib/http";
 import { bad } from "../lib/errors";
 import { rateLimit } from "../lib/ratelimit";
@@ -34,7 +34,7 @@ r.post("/terraform/check", requireRole("viewer"), rateLimit("tf-check", 60, 3600
   res.json({
     resourceCount: t.resources.length, counts, score: postureScore(counts), suppressed,
     failOn: b.failOn, fail: kept.some((f) => RANK[f.severity] >= RANK[b.failOn]),
-    findings: kept.map((f) => ({ ruleId: f.ruleId, title: f.title, severity: f.severity, riskScore: f.riskScore, address: f.resourceName, resourceType: f.resourceType, evidence: f.evidence, remediation: f.remediation })),
+    findings: kept.map((f) => ({ ruleId: f.ruleId, title: f.title, severity: f.severity, riskScore: f.riskScore, address: f.resourceName, resourceType: f.resourceType, evidence: f.evidence, remediation: f.remediation, fix: fixFor(f.ruleId, f) })),
     skipped: t.skipped, notes: t.notes,
   });
 });
