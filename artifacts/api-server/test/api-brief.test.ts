@@ -8,7 +8,7 @@ process.env["NODE_ENV"] = "test";
 const { openDb } = await import("@workspace/db");
 const { createApp } = await import("../src/app.ts");
 const { resetRateLimits } = await import("../src/lib/ratelimit.ts");
-const { sendDueDigests } = await import("../src/services/notifications.ts");
+const { sendDueDigests, sendDueWeeklyReports } = await import("../src/services/notifications.ts");
 
 let server: Server;
 let base: string;
@@ -114,4 +114,35 @@ test("the daily summary email: off by default, sent once to owners and admins wh
   await sendDueDigests({ db, mailer }, 24);                                                    // before the hour it is allowed to go out
   assert.equal(sent.length, 0);
   assert.equal((await off.c.get("/notifications")).json.dailyDigest, false);
+});
+
+test("the weekly report: off by default, once a week to owners and admins, even on a quiet week, never before the first scan", async () => {
+  const a = await signup(), fresh = await signup(), off = await signup();
+  await a.c.post("/scans", { config: [bucket("pub")] }); await off.c.post("/scans", { config: [bucket("pub")] });
+  assert.equal((await a.c.get("/notifications")).json.weeklyReport, false);
+  await a.c.put("/notifications", { weeklyReport: true }); await fresh.c.put("/notifications", { weeklyReport: true });
+  assert.equal((await a.c.get("/notifications")).json.weeklyReport, true);
+  await db.query("update findings set first_seen_at = now() - interval '30 days' where org_id = $1", [a.me.org.id]); // a quiet week
+  const inv = await a.c.post("/team/invite", { email: `an-${Date.now()}@example.com`, role: "analyst" });
+  await new Client().post("/invites/accept", { token: inv.json.link.split("/invite/")[1], password: "analyst password 12" });
+  sent.length = 0;
+  await sendDueWeeklyReports({ db, mailer }, 0, true);
+  assert.deepEqual(sent.map((m) => m.to), [a.email]);                                            // not the analyst, not the org that is off, not the one without scans
+  assert.match(sent[0].subject, /Brief \d+: your week in cloud security \(score \d+\)/);
+  assert.match(sent[0].text, /No new findings this week/); assert.match(sent[0].text, /Highest risks right now:/); assert.match(sent[0].text, /1\. \w+ .+ on pub/);
+  assert.match(sent[0].text, /\/report/);
+  sent.length = 0;
+  await sendDueWeeklyReports({ db, mailer }, 0, true);
+  assert.equal(sent.length, 0);                                                                  // once a week
+  await db.query("update notification_settings set last_weekly_at = now() - interval '7 days' where org_id = $1", [a.me.org.id]);
+  await sendDueWeeklyReports({ db, mailer }, 0, true);
+  assert.equal(sent.length, 1);
+  // Monday only, and after the hour
+  sent.length = 0;
+  await db.query("update notification_settings set last_weekly_at = null where org_id = $1", [a.me.org.id]);
+  await sendDueWeeklyReports({ db, mailer }, 24, true);
+  assert.equal(sent.length, 0);
+  const isMonday = new Date().getUTCDay() === 1;
+  await sendDueWeeklyReports({ db, mailer }, 0, false);
+  assert.equal(sent.length, isMonday ? 1 : 0, "outside Mondays nothing goes out");
 });

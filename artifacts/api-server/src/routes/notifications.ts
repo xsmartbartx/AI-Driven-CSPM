@@ -10,9 +10,9 @@ const r = Router();
 
 r.get("/notifications", requireRole("admin"), async (req, res) => {
   const { rows } = await req.db.query(
-    `select email_enabled as "emailEnabled", daily_digest as "dailyDigest", min_severity as "minSeverity", slack_webhook is not null as "slackConfigured", last_sent_at as "lastSentAt", last_error as "lastError"
+    `select email_enabled as "emailEnabled", daily_digest as "dailyDigest", weekly_report as "weeklyReport", min_severity as "minSeverity", slack_webhook is not null as "slackConfigured", last_sent_at as "lastSentAt", last_error as "lastError"
      from notification_settings where org_id = $1`, [req.auth!.orgId]);
-  res.json(rows[0] ?? { emailEnabled: false, dailyDigest: false, minSeverity: "high", slackConfigured: false, lastSentAt: null, lastError: null });
+  res.json(rows[0] ?? { emailEnabled: false, dailyDigest: false, weeklyReport: false, minSeverity: "high", slackConfigured: false, lastSentAt: null, lastError: null });
 });
 
 /** Omitted fields keep their value; slackWebhook: null removes the webhook. The webhook URL is never sent back. */
@@ -20,6 +20,7 @@ r.put("/notifications", requireRole("admin"), async (req, res) => {
   const b = parse(z.object({
     emailEnabled: z.boolean().optional(),
     dailyDigest: z.boolean().optional(),
+    weeklyReport: z.boolean().optional(),
     minSeverity: z.enum(["critical", "high"]).optional(),
     slackWebhook: z.string().trim().max(300).nullable().optional(),
   }), req.body);
@@ -27,16 +28,17 @@ r.put("/notifications", requireRole("admin"), async (req, res) => {
     throw bad("That is not a Slack incoming webhook URL (https://hooks.slack.com/services/…)", "invalid_webhook");
   const setHook = b.slackWebhook !== undefined;
   await req.db.query(
-    `insert into notification_settings (org_id, email_enabled, min_severity, slack_webhook, daily_digest) values ($1, coalesce($2, false), coalesce($3, 'high'), $4, coalesce($6, false))
+    `insert into notification_settings (org_id, email_enabled, min_severity, slack_webhook, daily_digest, weekly_report) values ($1, coalesce($2, false), coalesce($3, 'high'), $4, coalesce($6, false), coalesce($7, false))
      on conflict (org_id) do update set
        email_enabled = coalesce($2, notification_settings.email_enabled),
        daily_digest = coalesce($6, notification_settings.daily_digest),
+       weekly_report = coalesce($7, notification_settings.weekly_report),
        min_severity = coalesce($3, notification_settings.min_severity),
        slack_webhook = case when $5 then $4 else notification_settings.slack_webhook end,
        last_error = case when $5 then null else notification_settings.last_error end,
        updated_at = now()`,
-    [req.auth!.orgId, b.emailEnabled ?? null, b.minSeverity ?? null, b.slackWebhook ?? null, setHook, b.dailyDigest ?? null]);
-  await audit(req, "notifications.updated", [b.emailEnabled !== undefined && `email ${b.emailEnabled ? "on" : "off"}`, b.dailyDigest !== undefined && `daily summary ${b.dailyDigest ? "on" : "off"}`, b.minSeverity, setHook && `slack ${b.slackWebhook ? "set" : "removed"}`].filter(Boolean).join(", "));
+    [req.auth!.orgId, b.emailEnabled ?? null, b.minSeverity ?? null, b.slackWebhook ?? null, setHook, b.dailyDigest ?? null, b.weeklyReport ?? null]);
+  await audit(req, "notifications.updated", [b.emailEnabled !== undefined && `email ${b.emailEnabled ? "on" : "off"}`, b.dailyDigest !== undefined && `daily summary ${b.dailyDigest ? "on" : "off"}`, b.weeklyReport !== undefined && `weekly report ${b.weeklyReport ? "on" : "off"}`, b.minSeverity, setHook && `slack ${b.slackWebhook ? "set" : "removed"}`].filter(Boolean).join(", "));
   res.json({ ok: true });
 });
 

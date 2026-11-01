@@ -362,3 +362,8 @@ create policy tenant_isolation on suppressions to cspm_app using (org_id = app_o
 -- Optional daily summary email to owners and admins, alongside the per-scan alerts.
 alter table notification_settings add column if not exists daily_digest boolean not null default false;
 alter table notification_settings add column if not exists last_digest_at timestamptz;
+
+-- ===== 0011_weekly_report =====
+-- Optional weekly report email (Mondays), next to the per-scan alerts and the daily summary.
+alter table notification_settings add column if not exists weekly_report boolean not null default false;
+alter table notification_settings add column if not exists last_weekly_at timestamptz;

@@ -194,6 +194,7 @@ export function Settings() {
           <div className="list">
             <label className="row"><input type="checkbox" checked={notif.data.emailEnabled} onChange={(e) => saveNotif({ emailEnabled: e.target.checked })} /> Email owners and admins</label>
             <label className="row"><input type="checkbox" checked={!!notif.data.dailyDigest} onChange={(e) => saveNotif({ dailyDigest: e.target.checked })} /> Daily summary email (owners and admins, only when there is news)</label>
+            <label className="row"><input type="checkbox" checked={!!notif.data.weeklyReport} onChange={(e) => saveNotif({ weeklyReport: e.target.checked })} /> Weekly report email (Mondays, owners and admins)</label>
             <label className="row">Alert on <select className="input" style={{ maxWidth: 200 }} value={notif.data.minSeverity} onChange={(e) => saveNotif({ minSeverity: e.target.value })}><option value="high">Critical and high</option><option value="critical">Critical only</option></select></label>
             <form className="row" onSubmit={(e) => { e.preventDefault(); saveNotif({ slackWebhook: hook }); }}>
               <input className="input" style={{ maxWidth: 360 }} type="password" autoComplete="off" aria-label="Slack webhook URL" placeholder={notif.data.slackConfigured ? "Slack webhook saved (paste a new URL to replace)" : "https://hooks.slack.com/services/…"} value={hook} onChange={(e) => setHook(e.target.value)} />
