@@ -3,7 +3,7 @@ import type { Severity } from "@workspace/cspm-engine";
 import { config } from "../config";
 import { logger } from "../lib/logger";
 import type { Mailer } from "./mail";
-import { dailyBriefEmail, securityAlertEmail } from "./mail-templates";
+import { dailyBriefEmail, securityAlertEmail, weeklyReportEmail } from "./mail-templates";
 import { buildBrief } from "./brief";
 
 /** A finding that appeared (or came back) in a scan. */
@@ -86,5 +86,30 @@ export async function sendDueDigests(d: NotifyDeps, minHourUtc = 7): Promise<voi
       const to = (await d.db.query("select u.email from members m join users u on u.id = m.user_id where m.org_id = $1 and m.role in ('owner','admin') order by m.created_at limit $2", [orgId, MAX_RECIPIENTS])).rows;
       for (const r of to) await d.mailer.send(dailyBriefEmail(r.email, org, brief));
     } catch (e) { logger.warn({ org: orgId, err: e instanceof Error ? e.message : String(e) }, "daily digest failed"); }
+  }
+}
+
+/**
+ * The optional weekly report: Mondays after 07:00 UTC, to owners and admins, once per organization. It is sent even
+ * when the week was quiet (a weekly "nothing happened, the score is N" is the point of a report), but not to an
+ * organization that has never scanned.
+ */
+export async function sendDueWeeklyReports(d: NotifyDeps, minHourUtc = 7, anyDay = false): Promise<void> {
+  let due: { org_id: string }[] = [];
+  try {
+    due = (await d.db.query(
+      `update notification_settings set last_weekly_at = now()
+       where weekly_report and (last_weekly_at is null or last_weekly_at < now() - interval '6 days')
+         and ($2::boolean or extract(isodow from now() at time zone 'utc') = 1) and extract(hour from now() at time zone 'utc') >= $1
+       returning org_id`, [minHourUtc, anyDay])).rows as { org_id: string }[];
+  } catch (e) { logger.warn({ err: e instanceof Error ? e.message : String(e) }, "weekly report claim failed"); return; }
+  for (const { org_id: orgId } of due) {
+    try {
+      const brief = await buildBrief(d.db, orgId, 168, 5);
+      if (!brief.hasData) continue;
+      const org = (await d.db.query("select name from organizations where id = $1", [orgId])).rows[0]?.name ?? "your organization";
+      const to = (await d.db.query("select u.email from members m join users u on u.id = m.user_id where m.org_id = $1 and m.role in ('owner','admin') order by m.created_at limit $2", [orgId, MAX_RECIPIENTS])).rows;
+      for (const r of to) await d.mailer.send(weeklyReportEmail(r.email, org, brief));
+    } catch (e) { logger.warn({ org: orgId, err: e instanceof Error ? e.message : String(e) }, "weekly report failed"); }
   }
 }

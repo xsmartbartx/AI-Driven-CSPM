@@ -6,7 +6,7 @@ import { logger } from "../lib/logger";
 import type { Mailer } from "./mail";
 import { scheduledScanStoppedEmail } from "./mail-templates";
 import { scanConnection, type Conn } from "./aws/scan";
-import { notifyScan, sendDueDigests } from "./notifications";
+import { notifyScan, sendDueDigests, sendDueWeeklyReports } from "./notifications";
 import { sweepExpiredSuppressions } from "./suppressions";
 import type { AwsConnector } from "./aws/types";
 
@@ -113,6 +113,7 @@ export function startScheduler(d: SchedulerDeps, tickMs = 60_000): { stop(): Pro
     inflight = (async () => {
       try { await sweepExpiredSuppressions(d.db); } catch (e) { logger.error({ err: (e as Error).name }, "suppression sweep failed"); } // never blocks the scans below
       try { await sendDueDigests({ db: d.db, mailer: d.mailer }); } catch (e) { logger.error({ err: (e as Error).name }, "daily digest failed"); }
+      try { await sendDueWeeklyReports({ db: d.db, mailer: d.mailer }); } catch (e) { logger.error({ err: (e as Error).name }, "weekly report failed"); }
       try { await runDueScans(d); } catch (e) { logger.error({ err: (e as Error).name }, "scheduler tick failed"); }
     })().finally(() => { inflight = null; });
   };

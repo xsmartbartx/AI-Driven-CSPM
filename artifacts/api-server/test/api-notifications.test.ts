@@ -56,7 +56,7 @@ const reset = () => { sent.length = 0; slack.length = 0; slackStatus.code = 200;
 test("off by default: scans send nothing", async () => {
   reset();
   const { c } = await signup();
-  assert.deepEqual((await c.get("/notifications")).json, { emailEnabled: false, dailyDigest: false, minSeverity: "high", slackConfigured: false, lastSentAt: null, lastError: null });
+  assert.deepEqual((await c.get("/notifications")).json, { emailEnabled: false, dailyDigest: false, weeklyReport: false, minSeverity: "high", slackConfigured: false, lastSentAt: null, lastError: null });
   assert.equal((await c.post("/scans", { config: SAMPLE_PATHS_CONFIG() })).status, 201);
   await new Promise((r) => setTimeout(r, 150));
   assert.equal(sent.length, 0); assert.equal(slack.length, 0);

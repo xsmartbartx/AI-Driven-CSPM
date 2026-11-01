@@ -462,6 +462,12 @@ test.describe("F14 daily summary", () => {
     await expect(page.getByText("Saved")).toBeVisible();
     await page.reload();
     await expect(box).toBeChecked();
+    const weekly = page.getByLabel("Weekly report email (Mondays, owners and admins)");
+    await expect(weekly).not.toBeChecked();
+    await weekly.click();
+    await expect(weekly).toBeChecked();
+    await page.reload();
+    await expect(weekly).toBeChecked();
   });
 });
 

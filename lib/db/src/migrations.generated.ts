@@ -39,5 +39,9 @@ export const MIGRATIONS: { version: string; sql: string }[] = [
   {
     "version": "0010_daily_digest",
     "sql": "-- Optional daily summary email to owners and admins, alongside the per-scan alerts.\nalter table notification_settings add column if not exists daily_digest boolean not null default false;\nalter table notification_settings add column if not exists last_digest_at timestamptz;\n"
+  },
+  {
+    "version": "0011_weekly_report",
+    "sql": "-- Optional weekly report email (Mondays), next to the per-scan alerts and the daily summary.\nalter table notification_settings add column if not exists weekly_report boolean not null default false;\nalter table notification_settings add column if not exists last_weekly_at timestamptz;\n"
   }
 ];

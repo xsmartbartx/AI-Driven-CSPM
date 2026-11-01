@@ -17,7 +17,7 @@ const plural = (n: number, one: string, many = one + "s") => `${n} ${n === 1 ? o
  * What changed, in plain sentences, from the data already stored: no model involved, so every line can be traced to a
  * finding. "New" means first seen inside the window and still open (suppressed or fixed ones are not news).
  */
-export async function buildBrief(q: Queryable, orgId: string, hours = 24): Promise<Brief> {
+export async function buildBrief(q: Queryable, orgId: string, hours = 24, topN = 3): Promise<Brief> {
   const since = new Date(Date.now() - hours * 3600_000);
   const sinceIso = since.toISOString();
   const { rows: cnt } = await q.query("select severity, count(*)::int as n from findings where org_id = $1 and status = 'open' group by severity", [orgId]);
@@ -40,7 +40,7 @@ export async function buildBrief(q: Queryable, orgId: string, hours = 24): Promi
   const fixed = (await q.query("select count(*)::int as n from findings where org_id = $1 and status = 'fixed' and updated_at >= $2", [orgId, sinceIso])).rows[0].n as number;
   const { rows: top } = await q.query(
     `select f.id, f.title, f.severity, f.risk_score as "riskScore", a.name as "assetName" from findings f join assets a on a.id = f.asset_id
-     where f.org_id = $1 and f.status = 'open' order by f.risk_score desc, f.title limit 3`, [orgId]);
+     where f.org_id = $1 and f.status = 'open' order by f.risk_score desc, f.title limit $2`, [orgId, topN]);
   const accepted = (await q.query("select count(*)::int as n from findings where org_id = $1 and status = 'accepted' and accepted_until <= now() + interval '14 days'", [orgId])).rows[0].n as number;
   const sups = (await q.query("select count(*)::int as n from suppressions where org_id = $1 and expires_at is not null and expires_at <= now() + interval '14 days'", [orgId])).rows[0].n as number;
 
