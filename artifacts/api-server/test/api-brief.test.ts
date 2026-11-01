@@ -130,7 +130,7 @@ test("the weekly report: off by default, once a week to owners and admins, even 
   await sendDueWeeklyReports({ db, mailer }, 0, true);
   assert.deepEqual(sent.map((m) => m.to), [a.email]);                                            // not the analyst, not the org that is off, not the one without scans
   assert.match(sent[0].subject, /Brief \d+: your week in cloud security \(score \d+\)/);
-  assert.match(sent[0].text, /No new findings this week/); assert.match(sent[0].text, /Highest risks right now:/); assert.match(sent[0].text, /1\. \w+ .+ on pub/);
+  assert.match(sent[0].text, /No new findings in the last week/); assert.match(sent[0].text, /Highest risks right now:/); assert.match(sent[0].text, /1\. \w+ .+ on pub/);
   assert.match(sent[0].text, /\/report/);
   sent.length = 0;
   await sendDueWeeklyReports({ db, mailer }, 0, true);
@@ -157,7 +157,7 @@ test("the weekly report lists the new findings the brief mentions and five top r
   const mine = sent.filter((m) => m.to === a.email); // other organizations in this database may have a report due too
   assert.equal(mine.length, 1);
   const text: string = mine[0].text;
-  assert.match(text, /7 new findings this week, the 5 highest are listed/);
+  assert.match(text, /7 new findings in the last week, the 5 highest are listed/);
   assert.equal((text.match(/^New: /gm) ?? []).length, 5);                                       // what the sentence promises
   assert.equal((text.match(/^\d\. /gm) ?? []).length, 5);                                        // five top risks
   assert.equal((await a.c.get("/brief")).json.topRisks.length, 3);                             // the dashboard brief keeps three
@@ -168,4 +168,30 @@ test("the background tick (suppression expiry, daily summary, weekly report) doe
   assert.equal(schedulerEnabled({ CSPM_AWS_ACCOUNT_ID: "123456789012" }), true);
   assert.equal(schedulerEnabled({ SCHEDULER: "0" }), false);                                    // and it can still be switched off
   assert.equal(schedulerEnabled({ SCHEDULER: "1" }), true);
+});
+
+test("report delivery: an organization that has not scanned is not claimed, and a first scan the same day still gets its report", async () => {
+  const x = await signup();
+  await x.c.put("/notifications", { weeklyReport: true, dailyDigest: true });
+  await sendDueWeeklyReports({ db, mailer }, 0, true); await sendDueDigests({ db, mailer }, 0);
+  const row = async () => (await db.query("select last_weekly_at, last_digest_at from notification_settings where org_id = $1", [x.me.org.id])).rows[0];
+  assert.deepEqual(await row(), { last_weekly_at: null, last_digest_at: null });                // not claimed, so not used up
+  await x.c.post("/scans", { config: [bucket("late")] });
+  sent.length = 0;
+  await sendDueWeeklyReports({ db, mailer }, 0, true); await sendDueDigests({ db, mailer }, 0);
+  assert.equal(sent.filter((m) => m.to === x.email).length, 2);                                 // the weekly report and the daily summary
+});
+
+test("report delivery: organizations are claimed one at a time inside a time budget, so a stop loses at most the one in hand", async () => {
+  const orgs = [await signup(), await signup(), await signup()];
+  for (const o of orgs) { await o.c.post("/scans", { config: [bucket("p")] }); await o.c.put("/notifications", { weeklyReport: true }); }
+  await db.query("update notification_settings set weekly_report = false where org_id <> all($1::uuid[])", [orgs.map((o) => o.me.org.id)]); // only these three are due
+  const slow = { enabled: true, send: async (m: any) => { await new Promise((r) => setTimeout(r, 120)); sent.push(m); return true; } };
+  sent.length = 0;
+  await sendDueWeeklyReports({ db, mailer: slow }, 0, true, 100);                              // budget 100 ms, one send takes 120 ms
+  const claimed = (await db.query("select count(*)::int as n from notification_settings where last_weekly_at is not null and org_id = any($1::uuid[])", [orgs.map((o) => o.me.org.id)])).rows[0].n;
+  assert.equal(claimed, 1); assert.equal(sent.length, 1);                                       // one claimed and delivered; the others wait for the next tick, unclaimed
+  await sendDueWeeklyReports({ db, mailer }, 0, true);                                          // the next tick finishes the rest
+  assert.deepEqual(new Set(sent.map((m) => m.to)), new Set(orgs.map((o) => o.email)));
+  assert.equal(sent.length, 3);
 });
