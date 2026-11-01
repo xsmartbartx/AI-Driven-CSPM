@@ -6,7 +6,7 @@ import type { Finding } from "./index";
  * The resource name comes from the user's own configuration, so it is only ever used as a sanitised identifier or inside
  * an escaped string.
  */
-export interface FixSnippet { terraform: string; awsCli?: string; notes: string[] }
+export interface FixSnippet { terraform?: string; yaml?: string; awsCli?: string; notes: string[] }
 
 /** A Terraform identifier: lowercase letters, digits and underscores, starting with a letter. */
 export const tfIdent = (name: string): string => {
@@ -66,6 +66,30 @@ const MAKERS: Record<string, Maker> = {
       notes: ["Connections from outside the VPC stop working: reach the database through a bastion, VPN or private endpoint first."],
     };
   },
+  "k8s-privileged": () => ({
+    yaml: `# in the pod spec\nspec:\n  hostNetwork: false\n  hostPID: false\n  hostIPC: false\n  containers:\n    - name: app\n      securityContext:\n        privileged: false\n        capabilities:\n          drop: ["ALL"]`,
+    notes: ["If a component truly needs host access (a CNI plugin, a node agent), keep it alone in a locked-down namespace and restrict who can deploy there."],
+  }),
+  "k8s-host-path": () => ({
+    yaml: `# replace the hostPath volume\n  volumes:\n    - name: data\n      persistentVolumeClaim:\n        claimName: app-data   # or emptyDir: {} for scratch space`,
+    notes: ["If a hostPath cannot be avoided, mount it readOnly: true and as deep a path as possible."],
+  }),
+  "k8s-run-as-root": () => ({
+    yaml: `spec:\n  securityContext:\n    runAsNonRoot: true\n    runAsUser: 10001\n    runAsGroup: 10001\n    fsGroup: 10001`,
+    notes: ["The image must work as that user: files it writes need to be in a directory that user owns, and it cannot bind ports below 1024."],
+  }),
+  "k8s-privilege-escalation": () => ({
+    yaml: `# on every container\n      securityContext:\n        allowPrivilegeEscalation: false\n        capabilities:\n          drop: ["ALL"]`,
+    notes: ["Add back only the capabilities the container really needs, one by one."],
+  }),
+  "k8s-latest-image": () => ({
+    yaml: `      image: registry.example.com/team/app:1.4.2   # a version tag\n      # or pin the content: registry.example.com/team/app@sha256:<digest>`,
+    notes: ["Let your pipeline write the tag or digest, so deployments are reproducible and rollbacks go to a known image."],
+  }),
+  "k8s-no-limits": () => ({
+    yaml: `      resources:\n        requests:\n          cpu: 100m\n          memory: 128Mi\n        limits:\n          memory: 256Mi   # set from what the app really uses, with headroom`,
+    notes: ["A memory limit that is too low gets the container killed (OOMKilled); watch real usage before tightening it."],
+  }),
   "db-no-encryption": (f) => {
     const id = tfIdent(f.resourceName);
     return {

@@ -1,13 +1,13 @@
 import express, { Router } from "express";
 import { z } from "zod";
-import { evaluate, fixFor, fromTerraformPlan, postureScore, type Severity } from "@workspace/cspm-engine";
+import { fromTerraformPlan } from "@workspace/cspm-engine";
 import { parse, requireRole } from "../lib/http";
 import { bad } from "../lib/errors";
 import { rateLimit } from "../lib/ratelimit";
-import { activeSuppressions, refreshSuppressions } from "../services/suppressions";
+import { refreshSuppressions } from "../services/suppressions";
+import { checkResources } from "../services/checks";
 
 const r = Router();
-const RANK: Record<Severity, number> = { critical: 3, high: 2, medium: 1, low: 0 };
 
 /**
  * Checks a Terraform plan (terraform show -json) before it is applied. Nothing is stored and no scan is used: it is a
@@ -19,24 +19,8 @@ r.post("/terraform/check", requireRole("viewer"), rateLimit("tf-check", 60, 3600
   const t = fromTerraformPlan(b.plan);
   if (t.errors.length) throw bad(t.errors.join(" "), "invalid_plan");
   await refreshSuppressions(req.db, req.auth!.orgId);
-  const sup = (await activeSuppressions(req.db, req.auth!.orgId)).filter((s) => !s.assetId);
-  const env = new Map(t.resources.map((x) => [x.name, x.environment as string | undefined]));
-  const { findings } = evaluate(t.resources);
-  let suppressed = 0;
-  const kept = findings.filter((f) => {
-    const e = env.get(f.resourceName);
-    const hit = sup.find((s) => s.ruleId === f.ruleId && (!s.environment || s.environment === e));
-    if (hit) suppressed++;
-    return !hit;
-  });
-  const counts = { critical: 0, high: 0, medium: 0, low: 0 } as Record<Severity, number>;
-  kept.forEach((f) => counts[f.severity]++);
-  res.json({
-    resourceCount: t.resources.length, counts, score: postureScore(counts), suppressed,
-    failOn: b.failOn, fail: kept.some((f) => RANK[f.severity] >= RANK[b.failOn]),
-    findings: kept.map((f) => ({ ruleId: f.ruleId, title: f.title, severity: f.severity, riskScore: f.riskScore, address: f.resourceName, resourceType: f.resourceType, evidence: f.evidence, remediation: f.remediation, fix: fixFor(f.ruleId, f) })),
-    skipped: t.skipped, notes: t.notes,
-  });
+  const result = await checkResources(req.db, req.auth!.orgId, t.resources, b.failOn);
+  res.json({ ...result, skipped: t.skipped, notes: t.notes });
 });
 
 export default r;
