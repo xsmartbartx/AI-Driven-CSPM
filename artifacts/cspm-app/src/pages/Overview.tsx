@@ -58,6 +58,7 @@ export function Overview() {
             <Kpi label="Mapped controls passing" value={`${data.compliance.passing} of ${data.compliance.total}`} sub={<Link href="/compliance">View frameworks</Link>} />
           </section>
 
+          {brief.loading && !brief.data && !brief.error && <section className="card" aria-label="Loading the summary"><Skeleton lines={3} /></section>}
           {brief.data?.hasData && (
             <section className="card" aria-labelledby="brief-h">
               <h2 className="h2" id="brief-h">Since yesterday</h2>
